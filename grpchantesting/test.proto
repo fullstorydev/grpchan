@@ -1,0 +1,24 @@
+syntax = "proto3";
+
+import "google/protobuf/empty.proto";
+
+package grpchantesting;
+
+service TestService {
+	rpc Unary (Message) returns (Message);
+	rpc ClientStream (stream Message) returns (Message);
+	rpc ServerStream (Message) returns (stream Message);
+	rpc BidiStream (stream Message) returns (stream Message);
+
+	// UseExternalMessageTwice is here purely to test the protoc-gen-gochanstubs plug-in
+	rpc UseExternalMessageTwice (google.protobuf.Empty) returns (google.protobuf.Empty);
+}
+
+message Message {
+	bytes payload = 1;
+	int32 count = 2;
+	int32 code = 3;
+	int32 delay_millis = 4;
+	map<string, string> headers = 5;
+	map<string, string> trailers = 6;
+}

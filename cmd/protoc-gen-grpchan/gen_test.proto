@@ -1,0 +1,36 @@
+syntax = "proto3";
+
+package main;
+
+message Test {
+	int64 id = 1;
+	string name = 2;
+}
+
+service TestStreams {
+	// We need to verify the order in which streams are stored in a
+	// service desc in generated GRPC code. So we concoct a bunch of
+	// methods with streams interleaved therein, and then have a test
+	// that verifies the indexes of each stream method, ensuring they
+	// match the assumption made by protoc-gen-gochanstub code gen.
+
+	rpc Unary1 (Test) returns (Test);
+	rpc Unary2 (Test) returns (Test);
+	rpc Stream1 (stream Test) returns (Test);
+	rpc Unary3 (Test) returns (Test);
+	rpc Stream2 (stream Test) returns (stream Test);
+	rpc Unary4 (Test) returns (Test);
+	rpc Unary5 (Test) returns (Test);
+	rpc Stream3 (Test) returns (stream Test);
+	rpc Unary6 (Test) returns (Test);
+	rpc Unary7 (Test) returns (Test);
+	rpc Unary8 (Test) returns (Test);
+	rpc Stream4 (stream Test) returns (Test);
+	rpc Stream5 (Test) returns (stream Test);
+	rpc Unary9 (Test) returns (Test);
+	rpc Unary10 (Test) returns (Test);
+	rpc Unary11 (Test) returns (Test);
+	rpc Stream6 (stream Test) returns (stream Test);
+	rpc Stream7 (stream Test) returns (stream Test);
+	rpc Unary12 (Test) returns (Test);
+}

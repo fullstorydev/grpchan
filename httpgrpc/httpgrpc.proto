@@ -1,0 +1,18 @@
+syntax = "proto3";
+
+package fullstorydev.grpchan.httpgrpc;
+
+option go_package = "httpgrpc";
+
+// HttpTrailer is the last message sent in a streaming GRPC-over-HTTP
+// call, to encode the GRPC status code and any trailer metadata. This
+// message is only used in GRPC responses, not in requests.
+message HttpTrailer {
+	map<string, TrailerValues> metadata = 1;
+	int32 code = 2;
+	string message = 3;
+}
+
+message TrailerValues {
+	repeated string values = 1;
+}
