@@ -33,34 +33,14 @@ var _ = math.Inf
 const _ = proto.ProtoPackageIsVersion2 // please upgrade the proto package
 
 type Test struct {
-	Id                   int64    `protobuf:"varint,1,opt,name=id" json:"id,omitempty"`
-	Name                 string   `protobuf:"bytes,2,opt,name=name" json:"name,omitempty"`
-	XXX_NoUnkeyedLiteral struct{} `json:"-"`
-	XXX_unrecognized     []byte   `protobuf_unrecognized:"proto3" json:"-"`
-	XXX_sizecache        int32    `json:"-"`
+	Id   int64  `protobuf:"varint,1,opt,name=id" json:"id,omitempty"`
+	Name string `protobuf:"bytes,2,opt,name=name" json:"name,omitempty"`
 }
 
 func (m *Test) Reset()                    { *m = Test{} }
 func (m *Test) String() string            { return proto.CompactTextString(m) }
 func (*Test) ProtoMessage()               {}
 func (*Test) Descriptor() ([]byte, []int) { return fileDescriptor0, []int{0} }
-func (m *Test) Unmarshal(b []byte) error {
-	return xxx_messageInfo_Test.Unmarshal(m, b)
-}
-func (m *Test) Marshal(b []byte, deterministic bool) ([]byte, error) {
-	return xxx_messageInfo_Test.Marshal(b, m, deterministic)
-}
-func (dst *Test) XXX_Merge(src proto.Message) {
-	xxx_messageInfo_Test.Merge(dst, src)
-}
-func (m *Test) XXX_Size() int {
-	return xxx_messageInfo_Test.Size(m)
-}
-func (m *Test) XXX_DiscardUnknown() {
-	xxx_messageInfo_Test.DiscardUnknown(m)
-}
-
-var xxx_messageInfo_Test proto.InternalMessageInfo
 
 func (m *Test) GetId() int64 {
 	if m != nil {

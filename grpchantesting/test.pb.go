@@ -34,38 +34,18 @@ var _ = math.Inf
 const _ = proto.ProtoPackageIsVersion2 // please upgrade the proto package
 
 type Message struct {
-	Payload              []byte            `protobuf:"bytes,1,opt,name=payload,proto3" json:"payload,omitempty"`
-	Count                int32             `protobuf:"varint,2,opt,name=count" json:"count,omitempty"`
-	Code                 int32             `protobuf:"varint,3,opt,name=code" json:"code,omitempty"`
-	DelayMillis          int32             `protobuf:"varint,4,opt,name=delay_millis,json=delayMillis" json:"delay_millis,omitempty"`
-	Headers              map[string]string `protobuf:"bytes,5,rep,name=headers" json:"headers,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	Trailers             map[string]string `protobuf:"bytes,6,rep,name=trailers" json:"trailers,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	XXX_NoUnkeyedLiteral struct{}          `json:"-"`
-	XXX_unrecognized     []byte            `protobuf_unrecognized:"proto3" json:"-"`
-	XXX_sizecache        int32             `json:"-"`
+	Payload     []byte            `protobuf:"bytes,1,opt,name=payload,proto3" json:"payload,omitempty"`
+	Count       int32             `protobuf:"varint,2,opt,name=count" json:"count,omitempty"`
+	Code        int32             `protobuf:"varint,3,opt,name=code" json:"code,omitempty"`
+	DelayMillis int32             `protobuf:"varint,4,opt,name=delay_millis,json=delayMillis" json:"delay_millis,omitempty"`
+	Headers     map[string]string `protobuf:"bytes,5,rep,name=headers" json:"headers,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	Trailers    map[string]string `protobuf:"bytes,6,rep,name=trailers" json:"trailers,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 }
 
 func (m *Message) Reset()                    { *m = Message{} }
 func (m *Message) String() string            { return proto.CompactTextString(m) }
 func (*Message) ProtoMessage()               {}
 func (*Message) Descriptor() ([]byte, []int) { return fileDescriptor0, []int{0} }
-func (m *Message) Unmarshal(b []byte) error {
-	return xxx_messageInfo_Message.Unmarshal(m, b)
-}
-func (m *Message) Marshal(b []byte, deterministic bool) ([]byte, error) {
-	return xxx_messageInfo_Message.Marshal(b, m, deterministic)
-}
-func (dst *Message) XXX_Merge(src proto.Message) {
-	xxx_messageInfo_Message.Merge(dst, src)
-}
-func (m *Message) XXX_Size() int {
-	return xxx_messageInfo_Message.Size(m)
-}
-func (m *Message) XXX_DiscardUnknown() {
-	xxx_messageInfo_Message.DiscardUnknown(m)
-}
-
-var xxx_messageInfo_Message proto.InternalMessageInfo
 
 func (m *Message) GetPayload() []byte {
 	if m != nil {
@@ -111,8 +91,6 @@ func (m *Message) GetTrailers() map[string]string {
 
 func init() {
 	proto.RegisterType((*Message)(nil), "grpchantesting.Message")
-	proto.RegisterMapType((map[string]string)(nil), "grpchantesting.Message.HeadersEntry")
-	proto.RegisterMapType((map[string]string)(nil), "grpchantesting.Message.TrailersEntry")
 }
 
 // Reference imports to suppress errors if they are not otherwise used.

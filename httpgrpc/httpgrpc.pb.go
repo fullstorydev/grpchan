@@ -32,35 +32,15 @@ const _ = proto.ProtoPackageIsVersion2 // please upgrade the proto package
 // call, to encode the GRPC status code and any trailer metadata. This
 // message is only used in GRPC responses, not in requests.
 type HttpTrailer struct {
-	Metadata             map[string]*TrailerValues `protobuf:"bytes,1,rep,name=metadata" json:"metadata,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	Code                 int32                     `protobuf:"varint,2,opt,name=code" json:"code,omitempty"`
-	Message              string                    `protobuf:"bytes,3,opt,name=message" json:"message,omitempty"`
-	XXX_NoUnkeyedLiteral struct{}                  `json:"-"`
-	XXX_unrecognized     []byte                    `protobuf_unrecognized:"proto3" json:"-"`
-	XXX_sizecache        int32                     `json:"-"`
+	Metadata map[string]*TrailerValues `protobuf:"bytes,1,rep,name=metadata" json:"metadata,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	Code     int32                     `protobuf:"varint,2,opt,name=code" json:"code,omitempty"`
+	Message  string                    `protobuf:"bytes,3,opt,name=message" json:"message,omitempty"`
 }
 
 func (m *HttpTrailer) Reset()                    { *m = HttpTrailer{} }
 func (m *HttpTrailer) String() string            { return proto.CompactTextString(m) }
 func (*HttpTrailer) ProtoMessage()               {}
 func (*HttpTrailer) Descriptor() ([]byte, []int) { return fileDescriptor0, []int{0} }
-func (m *HttpTrailer) Unmarshal(b []byte) error {
-	return xxx_messageInfo_HttpTrailer.Unmarshal(m, b)
-}
-func (m *HttpTrailer) Marshal(b []byte, deterministic bool) ([]byte, error) {
-	return xxx_messageInfo_HttpTrailer.Marshal(b, m, deterministic)
-}
-func (dst *HttpTrailer) XXX_Merge(src proto.Message) {
-	xxx_messageInfo_HttpTrailer.Merge(dst, src)
-}
-func (m *HttpTrailer) XXX_Size() int {
-	return xxx_messageInfo_HttpTrailer.Size(m)
-}
-func (m *HttpTrailer) XXX_DiscardUnknown() {
-	xxx_messageInfo_HttpTrailer.DiscardUnknown(m)
-}
-
-var xxx_messageInfo_HttpTrailer proto.InternalMessageInfo
 
 func (m *HttpTrailer) GetMetadata() map[string]*TrailerValues {
 	if m != nil {
@@ -84,33 +64,13 @@ func (m *HttpTrailer) GetMessage() string {
 }
 
 type TrailerValues struct {
-	Values               []string `protobuf:"bytes,1,rep,name=values" json:"values,omitempty"`
-	XXX_NoUnkeyedLiteral struct{} `json:"-"`
-	XXX_unrecognized     []byte   `protobuf_unrecognized:"proto3" json:"-"`
-	XXX_sizecache        int32    `json:"-"`
+	Values []string `protobuf:"bytes,1,rep,name=values" json:"values,omitempty"`
 }
 
 func (m *TrailerValues) Reset()                    { *m = TrailerValues{} }
 func (m *TrailerValues) String() string            { return proto.CompactTextString(m) }
 func (*TrailerValues) ProtoMessage()               {}
 func (*TrailerValues) Descriptor() ([]byte, []int) { return fileDescriptor0, []int{1} }
-func (m *TrailerValues) Unmarshal(b []byte) error {
-	return xxx_messageInfo_TrailerValues.Unmarshal(m, b)
-}
-func (m *TrailerValues) Marshal(b []byte, deterministic bool) ([]byte, error) {
-	return xxx_messageInfo_TrailerValues.Marshal(b, m, deterministic)
-}
-func (dst *TrailerValues) XXX_Merge(src proto.Message) {
-	xxx_messageInfo_TrailerValues.Merge(dst, src)
-}
-func (m *TrailerValues) XXX_Size() int {
-	return xxx_messageInfo_TrailerValues.Size(m)
-}
-func (m *TrailerValues) XXX_DiscardUnknown() {
-	xxx_messageInfo_TrailerValues.DiscardUnknown(m)
-}
-
-var xxx_messageInfo_TrailerValues proto.InternalMessageInfo
 
 func (m *TrailerValues) GetValues() []string {
 	if m != nil {
@@ -121,7 +81,6 @@ func (m *TrailerValues) GetValues() []string {
 
 func init() {
 	proto.RegisterType((*HttpTrailer)(nil), "fullstorydev.grpchan.httpgrpc.HttpTrailer")
-	proto.RegisterMapType((map[string]*TrailerValues)(nil), "fullstorydev.grpchan.httpgrpc.HttpTrailer.MetadataEntry")
 	proto.RegisterType((*TrailerValues)(nil), "fullstorydev.grpchan.httpgrpc.TrailerValues")
 }
 
