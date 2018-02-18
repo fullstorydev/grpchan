@@ -108,7 +108,7 @@ type TestServiceClient interface {
 	ClientStream(ctx context.Context, opts ...grpc.CallOption) (TestService_ClientStreamClient, error)
 	ServerStream(ctx context.Context, in *Message, opts ...grpc.CallOption) (TestService_ServerStreamClient, error)
 	BidiStream(ctx context.Context, opts ...grpc.CallOption) (TestService_BidiStreamClient, error)
-	// UseExternalMessageTwice is here purely to test the protoc-gen-gochanstubs plug-in
+	// UseExternalMessageTwice is here purely to test the protoc-gen-grpchan plug-in
 	UseExternalMessageTwice(ctx context.Context, in *google_protobuf.Empty, opts ...grpc.CallOption) (*google_protobuf.Empty, error)
 }
 
@@ -242,7 +242,7 @@ type TestServiceServer interface {
 	ClientStream(TestService_ClientStreamServer) error
 	ServerStream(*Message, TestService_ServerStreamServer) error
 	BidiStream(TestService_BidiStreamServer) error
-	// UseExternalMessageTwice is here purely to test the protoc-gen-gochanstubs plug-in
+	// UseExternalMessageTwice is here purely to test the protoc-gen-grpchan plug-in
 	UseExternalMessageTwice(context.Context, *google_protobuf.Empty) (*google_protobuf.Empty, error)
 }
 
