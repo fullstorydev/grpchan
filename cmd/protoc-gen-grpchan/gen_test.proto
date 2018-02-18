@@ -12,7 +12,7 @@ service TestStreams {
 	// service desc in generated GRPC code. So we concoct a bunch of
 	// methods with streams interleaved therein, and then have a test
 	// that verifies the indexes of each stream method, ensuring they
-	// match the assumption made by protoc-gen-gochanstub code gen.
+	// match the assumption made by protoc-gen-grpchan code gen.
 
 	rpc Unary1 (Test) returns (Test);
 	rpc Unary2 (Test) returns (Test);

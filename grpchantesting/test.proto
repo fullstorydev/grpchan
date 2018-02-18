@@ -10,7 +10,7 @@ service TestService {
 	rpc ServerStream (Message) returns (stream Message);
 	rpc BidiStream (stream Message) returns (stream Message);
 
-	// UseExternalMessageTwice is here purely to test the protoc-gen-gochanstubs plug-in
+	// UseExternalMessageTwice is here purely to test the protoc-gen-grpchan plug-in
 	rpc UseExternalMessageTwice (google.protobuf.Empty) returns (google.protobuf.Empty);
 }
 

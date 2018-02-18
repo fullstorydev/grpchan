@@ -7,17 +7,17 @@ import (
 )
 
 // we use bash to mv the file after it is generated so that it will end in "_test.go"
-// (so it's just a test file and not linked into the actual protoc-gen-gochanstubs command)
+// (so it's just a test file and not linked into the actual protoc-gen-grpchan command)
 //go:generate bash -c "protoc gen_test.proto --go_out=plugins=grpc:./ && mv ./gen_test.pb.go ./gen_test_pb_test.go"
 
 func TestStreamOrder(t *testing.T) {
-	// we get the service descriptor (same descriptor that protoc-gen-gochanstubs processes
+	// we get the service descriptor (same descriptor that protoc-gen-grpchan processes
 	sd, err := grpcreflect.LoadServiceDescriptor(&_TestStreams_serviceDesc)
 	if err != nil {
 		t.Fatalf("failed to load service descriptor: %v", err)
 	}
 
-	// loop through stream methods just as protoc-gen-gochanstubs does to emit code
+	// loop through stream methods just as protoc-gen-grpchan does to emit code
 	streamCount := 0
 	for _, md := range sd.GetMethods() {
 		if md.IsClientStreaming() || md.IsServerStreaming() {
