@@ -1,5 +1,7 @@
 # gRPC Channels
 
+[![Build Status](https://travis-ci.org/fullstorydev/grpchan.svg?branch=master)](https://travis-ci.org/fullstorydev/grpchan/branches)  [![GoDoc](https://godoc.org/github.com/fullstorydev/grpchan?status.svg)](https://godoc.org/github.com/fullstorydev/grpchan)
+
 This repo provides an abstraction for an RPC connection: the `Channel`.
 Implementations of `Channel` can provide alternate transports -- different
 from the standard HTTP/2-based transport provided by the `google.golang.org/grpc`
