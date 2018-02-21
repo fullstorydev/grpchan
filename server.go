@@ -69,10 +69,13 @@ func (r HandlerMap) QueryService(name string) (*grpc.ServiceDesc, interface{}) {
 //    fu.RegisterHandlerFuBaz(newFuBazImpl())
 //
 //    // Now we can re-use these handlers for multiple channels:
+//    //   Normal gRPC
 //    svr := grpc.NewServer()
 //    reg.ForEach(svr.RegisterService)
-//    ipch := &channel.InProcessChannel{}
+//    //   In-process
+//    ipch := &inprocgrpc.Channel{}
 //    reg.ForEach(ipch.RegisterService)
+//    //   And HTTP 1.1
 //    httpgrpc.HandleServices(http.HandleFunc, "/rpc/", reg, nil, nil)
 //
 func (r HandlerMap) ForEach(fn func(desc *grpc.ServiceDesc, svr interface{})) {
