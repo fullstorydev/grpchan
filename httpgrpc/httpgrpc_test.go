@@ -15,7 +15,7 @@ import (
 func TestGrpcOverHttp(t *testing.T) {
 	svr := &grpchantesting.TestServer{}
 	reg := grpchan.HandlerMap{}
-	grpchantesting.RegisterHandlerTestService(reg, svr)
+	grpchantesting.RegisterTestServiceHandler(reg, svr)
 
 	var mux http.ServeMux
 	httpgrpc.HandleServices(mux.HandleFunc, "/", reg, nil, nil)

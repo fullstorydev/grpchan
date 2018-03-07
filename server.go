@@ -65,8 +65,8 @@ func (r HandlerMap) QueryService(name string) (*grpc.ServiceDesc, interface{}) {
 //    // Register all handlers once with the map:
 //    reg := channel.HandlerMap{}
 //    // (these registration functions are generated)
-//    foo.RegisterHandlerFooBar(newFooBarImpl())
-//    fu.RegisterHandlerFuBaz(newFuBazImpl())
+//    foo.RegisterFooBarHandler(newFooBarImpl())
+//    fu.RegisterFuBazHandler(newFuBazImpl())
 //
 //    // Now we can re-use these handlers for multiple channels:
 //    //   Normal gRPC
