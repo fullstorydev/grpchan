@@ -10,7 +10,7 @@ import (
 	"google.golang.org/grpc"
 )
 
-func RegisterHandlerTestService(reg grpchan.ServiceRegistry, srv TestServiceServer) {
+func RegisterTestServiceHandler(reg grpchan.ServiceRegistry, srv TestServiceServer) {
 	reg.RegisterService(&_TestService_serviceDesc, srv)
 }
 
