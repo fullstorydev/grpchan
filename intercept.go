@@ -83,13 +83,16 @@ func InterceptServer(svcDesc *grpc.ServiceDesc, unaryInt grpc.UnaryServerInterce
 			intercepted.Methods[i] = grpc.MethodDesc{
 				MethodName: md.MethodName,
 				Handler: func(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-					// combine unaryInt with the interceptor provided to handler
-					combinedInterceptor := func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (resp interface{}, err error) {
-						h := func(ctx context.Context, req interface{}) (interface{}, error) {
-							return unaryInt(ctx, req, info, handler)
+					combinedInterceptor := unaryInt
+					if interceptor != nil {
+						// combine unaryInt with the interceptor provided to handler
+						combinedInterceptor = func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (resp interface{}, err error) {
+							h := func(ctx context.Context, req interface{}) (interface{}, error) {
+								return unaryInt(ctx, req, info, handler)
+							}
+							// we first call provided interceptor, but supply a handler that will call unaryInt
+							return interceptor(ctx, req, info, h)
 						}
-						// we first call provided interceptor, but supply a handler that will call unaryInt
-						return interceptor(ctx, req, info, h)
 					}
 					return origHandler(srv, ctx, dec, combinedInterceptor)
 				},

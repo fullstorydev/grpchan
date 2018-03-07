@@ -40,6 +40,8 @@ var _ grpchan.Channel = (*Channel)(nil)
 // given resp with the server's reply. Client stubs that use HTTP 1.1 should use
 // this method instead of grpc.Invoke.
 func (ch *Channel) Invoke(ctx context.Context, methodName string, req, resp interface{}, opts ...grpc.CallOption) error {
+	// TODO(jh): support call options.. somehow?
+
 	h := headersFromContext(ctx)
 	h.Set("Content-Type", UnaryRpcContentType_V1)
 
@@ -97,6 +99,8 @@ func (ch *Channel) Invoke(ctx context.Context, methodName string, req, resp inte
 // NewStream executes a streaming RPC. Client stubs that use HTTP 1.1 should
 // use this method instead of grpc.NewClientStream.
 func (ch *Channel) NewStream(ctx context.Context, desc *grpc.StreamDesc, methodName string, opts ...grpc.CallOption) (grpc.ClientStream, error) {
+	// TODO(jh): support call options.. somehow?
+
 	ctx, cancel := context.WithCancel(ctx)
 
 	h := headersFromContext(ctx)
