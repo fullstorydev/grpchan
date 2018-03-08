@@ -3,12 +3,10 @@
 
 package grpchantesting
 
-import (
-	"github.com/fullstorydev/grpchan"
-	"github.com/golang/protobuf/ptypes/empty"
-	"golang.org/x/net/context"
-	"google.golang.org/grpc"
-)
+import "github.com/fullstorydev/grpchan"
+import "github.com/golang/protobuf/ptypes/empty"
+import "golang.org/x/net/context"
+import "google.golang.org/grpc"
 
 func RegisterTestServiceHandler(reg grpchan.ServiceRegistry, srv TestServiceServer) {
 	reg.RegisterService(&_TestService_serviceDesc, srv)
