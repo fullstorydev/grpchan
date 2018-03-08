@@ -102,15 +102,13 @@ func generateChanStubs(fd *desc.FileDescriptor) (*plugin_go.CodeGeneratorRespons
 	w("")
 	w("package %s", pkg)
 	w("")
-	w("import (")
 	for _, imp := range imports.imports {
 		if imp.alias != "" {
-			w("	%s %q", imp.alias, imp.packagePath)
+			w("import %s %q", imp.alias, imp.packagePath)
 		} else {
-			w("	%q", imp.packagePath)
+			w("import %q", imp.packagePath)
 		}
 	}
-	w(")")
 
 	for _, sd := range fd.GetServices() {
 		svcName := export(sd.GetName())
