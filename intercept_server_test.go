@@ -30,7 +30,7 @@ func TestInterceptServerUnary(t *testing.T) {
 	}
 
 	var successCount, failCount int
-	grpchantesting.RegisterHandlerTestService(grpchan.WithInterceptor(handlers,
+	grpchantesting.RegisterTestServiceHandler(grpchan.WithInterceptor(handlers,
 		func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 			if lastSeen != "a" {
 				// interceptor above should have been invoked first!
@@ -129,7 +129,7 @@ func TestInterceptServerStream(t *testing.T) {
 	handlers := grpchan.HandlerMap{}
 
 	var messageCount, successCount, failCount int
-	grpchantesting.RegisterHandlerTestService(grpchan.WithInterceptor(handlers, nil,
+	grpchantesting.RegisterTestServiceHandler(grpchan.WithInterceptor(handlers, nil,
 		func(srv interface{}, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
 			err := handler(srv, &testInterceptServerStream{
 				ServerStream: ss,

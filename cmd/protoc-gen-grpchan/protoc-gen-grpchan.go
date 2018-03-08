@@ -115,7 +115,7 @@ func generateChanStubs(fd *desc.FileDescriptor) (*plugin_go.CodeGeneratorRespons
 		lowerSvcName := unexport(svcName)
 
 		w("")
-		w("func RegisterHandler%s(reg grpchan.ServiceRegistry, srv %sServer) {", svcName, svcName)
+		w("func Register%sHandler(reg grpchan.ServiceRegistry, srv %sServer) {", svcName, svcName)
 		w("	reg.RegisterService(&_%s_serviceDesc, srv)", svcName)
 		w("}")
 		w("")

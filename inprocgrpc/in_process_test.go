@@ -10,8 +10,8 @@ import (
 func TestInProcessChannel(t *testing.T) {
 	svr := &grpchantesting.TestServer{}
 
-	var cc inprocgrpc.Channel
-	grpchantesting.RegisterHandlerTestService(&cc, svr)
+	var ch inprocgrpc.Channel
+	grpchantesting.RegisterTestServiceHandler(&ch, svr)
 
-	grpchantesting.RunChannelTestCases(t, &cc, true)
+	grpchantesting.RunChannelTestCases(t, &ch, true)
 }
