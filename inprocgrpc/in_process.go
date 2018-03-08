@@ -155,9 +155,6 @@ func (c *Channel) WithServerStreamInterceptor(interceptor grpc.StreamServerInter
 
 func (c *Channel) Invoke(ctx context.Context, method string, req, resp interface{}, opts ...grpc.CallOption) error {
 	// TODO(jh): support call options.. somehow?
-	if len(opts) > 0 {
-		panic("in-process channel does not support call options")
-	}
 
 	var strs []string
 	if method[0] == '/' {
@@ -202,9 +199,6 @@ func (c *Channel) Invoke(ctx context.Context, method string, req, resp interface
 
 func (c *Channel) NewStream(ctx context.Context, desc *grpc.StreamDesc, method string, opts ...grpc.CallOption) (grpc.ClientStream, error) {
 	// TODO(jh): support call options.. somehow?
-	if len(opts) > 0 {
-		panic("in-process channel does not support call options")
-	}
 
 	var strs []string
 	if method[0] == '/' {
