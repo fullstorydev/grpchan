@@ -50,7 +50,7 @@
 //        return &<serverName>ChannelClient{ch}
 //    }
 //
-//    func Register<ServerName>Handler(sr grpchan.ServiceRegistry, srv <ServerName>Server) {
+//    func RegisterHandler<ServerName>(sr grpchan.ServiceRegistry, srv <ServerName>Server) {
 //        s.RegisterService(&_<ServerName>_serviceDesc, srv)
 //    }
 //
