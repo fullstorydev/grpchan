@@ -8,7 +8,7 @@ import "github.com/golang/protobuf/ptypes/empty"
 import "golang.org/x/net/context"
 import "google.golang.org/grpc"
 
-func RegisterTestServiceHandler(reg grpchan.ServiceRegistry, srv TestServiceServer) {
+func RegisterHandlerTestService(reg grpchan.ServiceRegistry, srv TestServiceServer) {
 	reg.RegisterService(&_TestService_serviceDesc, srv)
 }
 
