@@ -104,14 +104,52 @@ func asMetadata(header http.Header) (metadata.MD, error) {
 	return md, nil
 }
 
-func toHeaders(md metadata.MD, h http.Header) {
+var reservedHeaders = map[string]struct{}{
+	"accept-encoding":   {},
+	"connection":        {},
+	"content-type":      {},
+	"content-length":    {},
+	"keep-alive":        {},
+	"te":                {},
+	"trailer":           {},
+	"transfer-encoding": {},
+	"upgrade":           {},
+}
+
+func toHeaders(md metadata.MD, h http.Header, prefix string) {
 	// binary headers must be base-64-encoded
 	for k, vs := range md {
+		lowerK := strings.ToLower(k)
+		if _, ok := reservedHeaders[lowerK]; ok {
+			// ignore reserved header keys
+			continue
+		}
+		isBin := strings.HasSuffix(lowerK, "-bin")
 		for _, v := range vs {
-			if strings.HasSuffix(strings.ToLower(k), "-bin") {
+			if isBin {
 				v = base64.URLEncoding.EncodeToString([]byte(v))
 			}
-			h.Add(k, v)
+			h.Add(prefix+k, v)
 		}
 	}
 }
+
+type strAddr string
+
+func (a strAddr) Network() string {
+	if a != "" {
+		// Per the documentation on net/http.Request.RemoteAddr, if this is
+		// set, it's set to the IP:port of the peer (hence, TCP):
+		// https://golang.org/pkg/net/http/#Request
+		//
+		// If we want to support Unix sockets later, we can
+		// add our own grpc-specific convention within the
+		// grpc codebase to set RemoteAddr to a different
+		// format, or probably better: we can attach it to the
+		// context and use that from serverHandlerTransport.RemoteAddr.
+		return "tcp"
+	}
+	return ""
+}
+
+func (a strAddr) String() string { return string(a) }

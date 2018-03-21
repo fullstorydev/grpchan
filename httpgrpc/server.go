@@ -16,7 +16,9 @@ import (
 	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 
 	"github.com/fullstorydev/grpchan"
@@ -40,7 +42,7 @@ func HandleServices(mux Mux, basePath string, reg grpchan.HandlerMap, unaryInt g
 	reg.ForEach(func(desc *grpc.ServiceDesc, svr interface{}) {
 		for i := range desc.Methods {
 			md := desc.Methods[i]
-			h := HandleMethod(svr, &md, unaryInt)
+			h := HandleMethod(svr, desc.ServiceName, &md, unaryInt)
 			mux(path.Join(basePath, fmt.Sprintf("%s/%s", desc.ServiceName, md.MethodName)), h)
 		}
 		for i := range desc.Streams {
@@ -53,9 +55,13 @@ func HandleServices(mux Mux, basePath string, reg grpchan.HandlerMap, unaryInt g
 
 // HandleMethod returns an HTTP handler that will handle a unary RPC method
 // by dispatching the given method on the given server.
-func HandleMethod(svr interface{}, desc *grpc.MethodDesc, unaryInt grpc.UnaryServerInterceptor) http.HandlerFunc {
+func HandleMethod(svr interface{}, serviceName string, desc *grpc.MethodDesc, unaryInt grpc.UnaryServerInterceptor) http.HandlerFunc {
+	fullMethod := fmt.Sprintf("/%s/%s", serviceName, desc.MethodName)
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
+		if p := peerFromRequest(r); p != nil {
+			ctx = peer.NewContext(ctx, p)
+		}
 		defer drainAndClose(r.Body)
 		if r.Method != "POST" {
 			w.Header().Set("Allow", "POST")
@@ -87,7 +93,10 @@ func HandleMethod(svr interface{}, desc *grpc.MethodDesc, unaryInt grpc.UnarySer
 		dec := func(msg interface{}) error {
 			return proto.Unmarshal(req, msg.(proto.Message))
 		}
-		resp, err := desc.Handler(svr, ctx, dec, unaryInt)
+		sts := &unaryServerTransportStream{name: fullMethod}
+		resp, err := desc.Handler(svr, grpc.NewContextWithServerTransportStream(ctx, sts), dec, unaryInt)
+		toHeaders(sts.headers(), w.Header(), "")
+		toHeaders(sts.trailers(), w.Header(), "X-GRPC-Trailer-")
 		if err != nil {
 			st, _ := status.FromError(err)
 			if st.Code() == codes.OK {
@@ -130,6 +139,9 @@ func HandleStream(svr interface{}, serviceName string, desc *grpc.StreamDesc, st
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
+		if p := peerFromRequest(r); p != nil {
+			ctx = peer.NewContext(ctx, p)
+		}
 		defer drainAndClose(r.Body)
 		if r.Method != "POST" {
 			w.Header().Set("Allow", "POST")
@@ -154,7 +166,9 @@ func HandleStream(svr interface{}, serviceName string, desc *grpc.StreamDesc, st
 
 		w.Header().Set("Content-Type", StreamRpcContentType_V1)
 
-		str := &serverStream{ctx: ctx, r: r, w: w, respStream: desc.ClientStreams}
+		str := &serverStream{r: r, w: w, respStream: desc.ClientStreams}
+		sts := &serverTransportStream{name: info.FullMethod, stream: str}
+		str.ctx = grpc.NewContextWithServerTransportStream(ctx, sts)
 		if streamInt != nil {
 			err = streamInt(svr, str, info, desc.Handler)
 		} else {
@@ -180,6 +194,14 @@ func HandleStream(svr interface{}, serviceName string, desc *grpc.StreamDesc, st
 
 		writeProtoMessage(w, &tr, true)
 	}
+}
+
+func peerFromRequest(r *http.Request) *peer.Peer {
+	pr := peer.Peer{Addr: strAddr(r.RemoteAddr)}
+	if r.TLS != nil {
+		pr.AuthInfo = credentials.TLSInfo{State: *r.TLS}
+	}
+	return &pr
 }
 
 func drainAndClose(r io.ReadCloser) error {
@@ -219,6 +241,83 @@ func asTrailerProto(md metadata.MD) map[string]*TrailerValues {
 	return result
 }
 
+type unaryServerTransportStream struct {
+	name string
+
+	mu       sync.Mutex
+	hdrs     metadata.MD
+	hdrsSent bool
+	tlrs     metadata.MD
+	tlrsSent bool
+}
+
+func (sts *unaryServerTransportStream) Method() string {
+	return sts.name
+}
+
+func (sts *unaryServerTransportStream) finish() {
+	sts.mu.Lock()
+	defer sts.mu.Unlock()
+	sts.hdrsSent = true
+	sts.tlrsSent = true
+}
+
+func (sts *unaryServerTransportStream) SetHeader(md metadata.MD) error {
+	sts.mu.Lock()
+	defer sts.mu.Unlock()
+	return sts.setHeaderLocked(md)
+}
+
+func (sts *unaryServerTransportStream) SendHeader(md metadata.MD) error {
+	sts.mu.Lock()
+	defer sts.mu.Unlock()
+	if err := sts.setHeaderLocked(md); err != nil {
+		return err
+	}
+	sts.hdrsSent = true
+	return nil
+}
+
+func (sts *unaryServerTransportStream) setHeaderLocked(md metadata.MD) error {
+	if sts.hdrsSent {
+		return fmt.Errorf("headers already sent")
+	}
+	if sts.hdrs == nil {
+		sts.hdrs = metadata.MD{}
+	}
+	for k, v := range md {
+		sts.hdrs[k] = append(sts.hdrs[k], v...)
+	}
+	return nil
+}
+
+func (sts *unaryServerTransportStream) headers() metadata.MD {
+	sts.mu.Lock()
+	defer sts.mu.Unlock()
+	return sts.hdrs
+}
+
+func (sts *unaryServerTransportStream) SetTrailer(md metadata.MD) error {
+	sts.mu.Lock()
+	defer sts.mu.Unlock()
+	if sts.tlrsSent {
+		return fmt.Errorf("trailers already sent")
+	}
+	if sts.tlrs == nil {
+		sts.tlrs = metadata.MD{}
+	}
+	for k, v := range md {
+		sts.tlrs[k] = append(sts.tlrs[k], v...)
+	}
+	return nil
+}
+
+func (sts *unaryServerTransportStream) trailers() metadata.MD {
+	sts.mu.Lock()
+	defer sts.mu.Unlock()
+	return sts.tlrs
+}
+
 // serverStream implements a server stream over HTTP 1.1.
 type serverStream struct {
 	ctx context.Context
@@ -244,7 +343,7 @@ func (s *serverStream) SetHeader(md metadata.MD) error {
 }
 
 func (s *serverStream) SendHeader(md metadata.MD) error {
-	return s.setHeader(md, false)
+	return s.setHeader(md, true)
 }
 
 func (s *serverStream) setHeader(md metadata.MD, send bool) error {
@@ -256,7 +355,7 @@ func (s *serverStream) setHeader(md metadata.MD, send bool) error {
 	}
 
 	h := s.w.Header()
-	toHeaders(md, h)
+	toHeaders(md, h, "")
 
 	if send {
 		s.w.WriteHeader(http.StatusOK)
@@ -367,4 +466,26 @@ func contextFromHeaders(parent context.Context, h http.Header) (context.Context,
 		}
 	}
 	return ctx, nil
+}
+
+type serverTransportStream struct {
+	name   string
+	stream *serverStream
+}
+
+func (sts *serverTransportStream) Method() string {
+	return sts.name
+}
+
+func (sts *serverTransportStream) SetHeader(md metadata.MD) error {
+	return sts.stream.SetHeader(md)
+}
+
+func (sts *serverTransportStream) SendHeader(md metadata.MD) error {
+	return sts.stream.SendHeader(md)
+}
+
+func (sts *serverTransportStream) SetTrailer(md metadata.MD) error {
+	sts.stream.SetTrailer(md)
+	return nil
 }
