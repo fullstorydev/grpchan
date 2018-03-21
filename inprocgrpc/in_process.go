@@ -18,7 +18,9 @@ import (
 	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 
 	"github.com/fullstorydev/grpchan"
@@ -153,8 +155,37 @@ func (c *Channel) WithServerStreamInterceptor(interceptor grpc.StreamServerInter
 	return c
 }
 
+type callOptions struct {
+	headers  []*metadata.MD
+	trailers []*metadata.MD
+	creds    credentials.PerRPCCredentials
+}
+
+var inprocessPeer = peer.Peer{
+	Addr:     inprocessAddr{},
+	AuthInfo: inprocessAddr{},
+}
+
+type inprocessAddr struct{}
+
+func (inprocessAddr) Network() string {
+	return "inproc"
+}
+
+func (inprocessAddr) String() string {
+	return "0"
+}
+
+func (inprocessAddr) AuthType() string {
+	return "inproc"
+}
+
 func (c *Channel) Invoke(ctx context.Context, method string, req, resp interface{}, opts ...grpc.CallOption) error {
-	// TODO(jh): support call options.. somehow?
+	copts := getCallOptions(opts)
+	ctx, err := applyPerRPCCreds(ctx, copts)
+	if err != nil {
+		return err
+	}
 
 	var strs []string
 	if method[0] != '/' {
@@ -214,9 +245,13 @@ func (c *Channel) Invoke(ctx context.Context, method string, req, resp interface
 					return err
 				}
 			case r.headers != nil:
-				// TODO
+				for _, hdrAddr := range copts.headers {
+					*hdrAddr = r.headers
+				}
 			case r.trailers != nil:
-				// TODO
+				for _, tlrAddr := range copts.trailers {
+					*tlrAddr = r.trailers
+				}
 			default:
 				return nil
 			}
@@ -227,7 +262,11 @@ func (c *Channel) Invoke(ctx context.Context, method string, req, resp interface
 }
 
 func (c *Channel) NewStream(ctx context.Context, desc *grpc.StreamDesc, method string, opts ...grpc.CallOption) (grpc.ClientStream, error) {
-	// TODO(jh): support call options.. somehow?
+	copts := getCallOptions(opts)
+	ctx, err := applyPerRPCCreds(ctx, copts)
+	if err != nil {
+		return nil, err
+	}
 
 	var strs []string
 	if method[0] != '/' {
@@ -286,11 +325,48 @@ func (c *Channel) NewStream(ctx context.Context, desc *grpc.StreamDesc, method s
 		requests:       requests,
 		responses:      responses,
 		responseStream: desc.ServerStreams,
+		copts:          copts,
 	}
 	runtime.SetFinalizer(cs, func(stream *inProcessClientStream) {
 		cancel()
 	})
 	return cs, nil
+}
+
+func getCallOptions(opts []grpc.CallOption) callOptions {
+	var copts callOptions
+	for _, o := range opts {
+		switch o := o.(type) {
+		case grpc.HeaderCallOption:
+			copts.headers = append(copts.headers, o.HeaderAddr)
+		case grpc.TrailerCallOption:
+			copts.trailers = append(copts.trailers, o.TrailerAddr)
+		case grpc.PeerCallOption:
+			*o.PeerAddr = inprocessPeer
+		case grpc.PerRPCCredsCallOption:
+			copts.creds = o.Creds
+		}
+	}
+	return copts
+}
+
+func applyPerRPCCreds(ctx context.Context, copts callOptions) (context.Context, error) {
+	if copts.creds != nil {
+		md, err := copts.creds.GetRequestMetadata(ctx, "inproc:0")
+		if err != nil {
+			return nil, err
+		}
+		if len(md) > 0 {
+			reqHeaders, ok := metadata.FromOutgoingContext(ctx)
+			if ok {
+				reqHeaders = metadata.Join(reqHeaders, metadata.New(md))
+			} else {
+				reqHeaders = metadata.New(md)
+			}
+			ctx = metadata.NewOutgoingContext(ctx, reqHeaders)
+		}
+	}
+	return ctx, nil
 }
 
 func makeServerContext(ctx context.Context) context.Context {
@@ -324,6 +400,8 @@ func makeServerContext(ctx context.Context) context.Context {
 	if meta, ok := metadata.FromOutgoingContext(ctx); ok {
 		newCtx = metadata.NewIncomingContext(newCtx, meta)
 	}
+	newCtx = peer.NewContext(newCtx, &inprocessPeer)
+
 	return newCtx
 }
 
@@ -571,6 +649,7 @@ func (sts *serverTransportStream) SetTrailer(md metadata.MD) error {
 type inProcessClientStream struct {
 	ctx            context.Context
 	svrCtx         context.Context
+	copts          callOptions
 	responseStream bool
 
 	respMu    sync.Mutex
@@ -601,8 +680,14 @@ func (s *inProcessClientStream) Header() (metadata.MD, error) {
 			switch m.kind() {
 			case kindHeaders:
 				s.headers = m.headers
+				for _, hdrAddr := range s.copts.headers {
+					*hdrAddr = s.headers
+				}
 			case kindTrailers:
 				s.trailers = m.trailers
+				for _, tlrAddr := range s.copts.trailers {
+					*tlrAddr = s.trailers
+				}
 			case kindError:
 				s.state = streamStateClosed
 				fallthrough
@@ -686,8 +771,14 @@ func (s *inProcessClientStream) recvMsgLocked(m interface{}, lastMessage bool) e
 		case kindHeaders:
 			s.state = streamStateMessages
 			s.headers = r.headers
+			for _, hdrAddr := range s.copts.headers {
+				*hdrAddr = s.headers
+			}
 		case kindTrailers:
 			s.trailers = r.trailers
+			for _, tlrAddr := range s.copts.trailers {
+				*tlrAddr = s.trailers
+			}
 		case kindError:
 			s.state = streamStateClosed
 			s.last = &r
