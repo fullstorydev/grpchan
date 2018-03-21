@@ -1,6 +1,7 @@
 package httpgrpc
 
 import (
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -88,12 +89,21 @@ func HandleMethod(svr interface{}, desc *grpc.MethodDesc, unaryInt grpc.UnarySer
 		}
 		resp, err := desc.Handler(svr, ctx, dec, unaryInt)
 		if err != nil {
-			code := codes.Internal
-			if st, ok := status.FromError(err); ok && st.Code() != codes.OK {
-				code = st.Code()
+			st, _ := status.FromError(err)
+			if st.Code() == codes.OK {
+				st = status.New(codes.Internal, err.Error())
 			}
-			httpStatus := httpStatusFromCode(code)
-			w.Header().Set("X-GRPC-Status", fmt.Sprintf("%d:%s", code, err.Error()))
+			statProto := st.Proto()
+			w.Header().Set("X-GRPC-Status", fmt.Sprintf("%d:%s", statProto.Code, statProto.Message))
+			for _, d := range statProto.Details {
+				b, err := proto.Marshal(d)
+				if err != nil {
+					continue
+				}
+				str := base64.RawURLEncoding.EncodeToString(b)
+				w.Header().Add(grpcDetailsHeader, str)
+			}
+			httpStatus := httpStatusFromCode(st.Code())
 			writeError(w, httpStatus)
 			return
 		}
@@ -156,18 +166,18 @@ func HandleStream(svr interface{}, serviceName string, desc *grpc.StreamDesc, st
 		}
 
 		tr := HttpTrailer{
-			Code:     int32(codes.Internal),
-			Message:  "Internal Server Error",
 			Metadata: asTrailerProto(metadata.Join(str.tr...)),
 		}
-		// status.FromError returns "OK" status if err == nil
-		if st, ok := status.FromError(err); ok {
-			tr.Code = int32(st.Code())
-			tr.Message = st.Message()
-			if tr.Message == "" {
-				tr.Message = st.Code().String()
-			}
+		if st, _ := status.FromError(err); st.Code() != codes.OK {
+			statProto := st.Proto()
+			tr.Code = statProto.Code
+			tr.Message = statProto.Message
+			tr.Details = statProto.Details
+		} else if err != nil {
+			tr.Code = int32(codes.Internal)
+			tr.Message = "Internal Server Error"
 		}
+
 		writeProtoMessage(w, &tr, true)
 	}
 }

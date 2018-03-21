@@ -57,7 +57,12 @@
 // based on the GRPC status code. But the response also includes a special response header,
 // "X-GRPC-Status", that encodes the actual GRPC status code and message in a "code:message"
 // string format. The response body is the binary-encoded form of the response proto, but
-// will be empty when the GRPC status code is not "OK".
+// will be empty when the GRPC status code is not "OK". If the RPC failed and the error
+// includes details, they are attached via one or more headers named "X-GRPC-Details". If
+// more than one error detail is associated with the status, there will be more than one
+// header, and they will be added to the response in the same order as they appear in the
+// server-side status. The value for the details header is a base64-encoding
+// google.protobuf.Any message, which contains the error detail message.
 //
 // Streaming RPCs are a bit more complex. Since the payloads can include multiple messages,
 // the content type is not "application/x-protobuf". It is instead "application/x-grpc-proto".
@@ -68,9 +73,9 @@
 // be written as -15 on the wire in the 32-bit prefix). The type of this special final
 // message is always HttpTrailer, whereas the types of all other messages in the sequence
 // are that of the method's request proto. The HttpTrailer final message indicates the final
-// disposition of the stream (e.g. a GRPC status code) as well as any trailing metadata.
-// Because the status code is not encoded until the end of the response payload, the HTTP
-// status code (which is the first line of the reply) will be 200 OK.
+// disposition of the stream (e.g. a GRPC status code and error details) as well as any
+// trailing metadata. Because the status code is not encoded until the end of the response
+// payload, the HTTP status code (which is the first line of the reply) will be 200 OK.
 //
 // For clients that support streaming, client and server streams both work over HTTP 1.1.
 // However, bidirectional streaming methods can only work if they are "half-duplex", where

@@ -6,6 +6,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/golang/protobuf/proto"
+	"github.com/golang/protobuf/ptypes"
+	"github.com/golang/protobuf/ptypes/any"
+	"github.com/golang/protobuf/ptypes/struct"
 	"golang.org/x/net/context"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
@@ -54,7 +58,33 @@ var (
 		"5baz5":        "8bedazzle8",
 		"6pickle6-bin": string(testPayload),
 	}
+
+	testErrorMessages = []proto.Message{
+		&structpb.ListValue{
+			Values: []*structpb.Value{
+				{Kind: &structpb.Value_NumberValue{NumberValue: 123}},
+				{Kind: &structpb.Value_StringValue{StringValue: "foo"}},
+			},
+		},
+		&structpb.Struct{
+			Fields: map[string]*structpb.Value{
+				"FOO": {Kind: &structpb.Value_NumberValue{NumberValue: 456}},
+				"BAR": {Kind: &structpb.Value_StringValue{StringValue: "bar"}},
+			},
+		},
+	}
+	testErrorDetails []*any.Any
 )
+
+func init() {
+	for _, msg := range testErrorMessages {
+		if a, err := ptypes.MarshalAny(msg); err != nil {
+			panic(err)
+		} else {
+			testErrorDetails = append(testErrorDetails, a)
+		}
+	}
+}
 
 func testUnary(t *testing.T, cli TestServiceClient) {
 	// NB(jh): implementations of channel.Channel currently can't support
@@ -81,15 +111,10 @@ func testUnary(t *testing.T, cli TestServiceClient) {
 
 	t.Run("failure", func(t *testing.T) {
 		_, err := cli.Unary(ctx, &Message{
-			Code: int32(codes.AlreadyExists),
+			Code:         int32(codes.AlreadyExists),
+			ErrorDetails: testErrorDetails,
 		})
-		st, ok := status.FromError(err)
-		if !ok {
-			t.Fatalf("wrong type of error")
-		}
-		if st.Code() != codes.AlreadyExists {
-			t.Fatalf("wrong response code: %v != %v", st.Code(), codes.AlreadyExists)
-		}
+		checkError(t, err, codes.AlreadyExists, testErrorMessages...)
 	})
 
 	t.Run("timeout", func(t *testing.T) {
@@ -97,13 +122,7 @@ func testUnary(t *testing.T, cli TestServiceClient) {
 		_, err := cli.Unary(tctx, &Message{
 			DelayMillis: 500,
 		})
-		st, ok := status.FromError(err)
-		if !ok {
-			t.Fatalf("wrong type of error")
-		}
-		if st.Code() != codes.DeadlineExceeded {
-			t.Fatalf("wrong response code: %v != %v", st.Code(), codes.DeadlineExceeded)
-		}
+		checkError(t, err, codes.DeadlineExceeded)
 	})
 
 	t.Run("canceled", func(t *testing.T) {
@@ -113,13 +132,7 @@ func testUnary(t *testing.T, cli TestServiceClient) {
 		_, err := cli.Unary(cctx, &Message{
 			DelayMillis: 500,
 		})
-		st, ok := status.FromError(err)
-		if !ok {
-			t.Fatalf("wrong type of error")
-		}
-		if st.Code() != codes.Canceled {
-			t.Fatalf("wrong response code: %v != %v", st.Code(), codes.Canceled)
-		}
+		checkError(t, err, codes.Canceled)
 	})
 }
 
@@ -179,19 +192,14 @@ func testClientStream(t *testing.T, cli TestServiceClient) {
 		}
 
 		reqMsg.Code = int32(codes.ResourceExhausted)
+		reqMsg.ErrorDetails = testErrorDetails
 		err = cs.Send(reqMsg)
 		if err != nil {
 			t.Fatalf("sending message failed: %v", err)
 		}
 
 		_, err = cs.CloseAndRecv()
-		st, ok := status.FromError(err)
-		if !ok {
-			t.Fatalf("wrong type of error")
-		}
-		if st.Code() != codes.ResourceExhausted {
-			t.Fatalf("wrong response code: %v != %v", st.Code(), codes.ResourceExhausted)
-		}
+		checkError(t, err, codes.ResourceExhausted, testErrorMessages...)
 	})
 
 	t.Run("timeout", func(t *testing.T) {
@@ -210,13 +218,7 @@ func testClientStream(t *testing.T, cli TestServiceClient) {
 		}
 
 		_, err = cs.CloseAndRecv()
-		st, ok := status.FromError(err)
-		if !ok {
-			t.Fatalf("wrong type of error")
-		}
-		if st.Code() != codes.DeadlineExceeded {
-			t.Fatalf("wrong response code: %v != %v", st.Code(), codes.DeadlineExceeded)
-		}
+		checkError(t, err, codes.DeadlineExceeded)
 	})
 
 	t.Run("canceled", func(t *testing.T) {
@@ -237,13 +239,7 @@ func testClientStream(t *testing.T, cli TestServiceClient) {
 		}
 
 		_, err = cs.CloseAndRecv()
-		st, ok := status.FromError(err)
-		if !ok {
-			t.Fatalf("wrong type of error")
-		}
-		if st.Code() != codes.Canceled {
-			t.Fatalf("wrong response code: %v != %v", st.Code(), codes.Canceled)
-		}
+		checkError(t, err, codes.Canceled)
 	})
 }
 
@@ -289,6 +285,7 @@ func testServerStream(t *testing.T, cli TestServiceClient) {
 	t.Run("failure", func(t *testing.T) {
 		reqMsg.Count = 2
 		reqMsg.Code = int32(codes.FailedPrecondition)
+		reqMsg.ErrorDetails = testErrorDetails
 		ss, err := cli.ServerStream(ctx, reqMsg)
 		if err != nil {
 			t.Fatalf("RPC failed: %v", err)
@@ -305,13 +302,7 @@ func testServerStream(t *testing.T, cli TestServiceClient) {
 			checkHeaders(t, testOutgoingMd, m.Headers)
 		}
 		_, err = ss.Recv()
-		st, ok := status.FromError(err)
-		if !ok {
-			t.Fatalf("wrong type of error")
-		}
-		if st.Code() != codes.FailedPrecondition {
-			t.Fatalf("wrong response code: %v != %v", st.Code(), codes.FailedPrecondition)
-		}
+		checkError(t, err, codes.FailedPrecondition, testErrorMessages...)
 	})
 
 	t.Run("timeout", func(t *testing.T) {
@@ -326,13 +317,7 @@ func testServerStream(t *testing.T, cli TestServiceClient) {
 		}
 
 		_, err = ss.Recv()
-		st, ok := status.FromError(err)
-		if !ok {
-			t.Fatalf("wrong type of error")
-		}
-		if st.Code() != codes.DeadlineExceeded {
-			t.Fatalf("wrong response code: %v != %v", st.Code(), codes.DeadlineExceeded)
-		}
+		checkError(t, err, codes.DeadlineExceeded)
 	})
 
 	t.Run("canceled", func(t *testing.T) {
@@ -348,13 +333,7 @@ func testServerStream(t *testing.T, cli TestServiceClient) {
 		}
 
 		_, err = ss.Recv()
-		st, ok := status.FromError(err)
-		if !ok {
-			t.Fatalf("wrong type of error")
-		}
-		if st.Code() != codes.Canceled {
-			t.Fatalf("wrong response code: %v != %v", st.Code(), codes.Canceled)
-		}
+		checkError(t, err, codes.Canceled)
 	})
 }
 
@@ -447,6 +426,7 @@ func testHalfDuplexBidiStream(t *testing.T, cli TestServiceClient) {
 		}
 
 		reqMsg.Code = int32(codes.DataLoss)
+		reqMsg.ErrorDetails = testErrorDetails
 		err = bidi.Send(reqMsg)
 		if err != nil {
 			t.Fatalf("sending message #2 failed: %v", err)
@@ -466,13 +446,7 @@ func testHalfDuplexBidiStream(t *testing.T, cli TestServiceClient) {
 		}
 
 		_, err = bidi.Recv()
-		st, ok := status.FromError(err)
-		if !ok {
-			t.Fatalf("wrong type of error")
-		}
-		if st.Code() != codes.DataLoss {
-			t.Fatalf("wrong response code: %v != %v", st.Code(), codes.DataLoss)
-		}
+		checkError(t, err, codes.DataLoss, testErrorMessages...)
 	})
 
 	t.Run("timeout", func(t *testing.T) {
@@ -496,13 +470,7 @@ func testHalfDuplexBidiStream(t *testing.T, cli TestServiceClient) {
 		}
 
 		_, err = bidi.Recv()
-		st, ok := status.FromError(err)
-		if !ok {
-			t.Fatalf("wrong type of error")
-		}
-		if st.Code() != codes.DeadlineExceeded {
-			t.Fatalf("wrong response code: %v != %v", st.Code(), codes.DeadlineExceeded)
-		}
+		checkError(t, err, codes.DeadlineExceeded)
 	})
 
 	t.Run("canceled", func(t *testing.T) {
@@ -528,13 +496,7 @@ func testHalfDuplexBidiStream(t *testing.T, cli TestServiceClient) {
 		}
 
 		_, err = bidi.Recv()
-		st, ok := status.FromError(err)
-		if !ok {
-			t.Fatalf("wrong type of error")
-		}
-		if st.Code() != codes.Canceled {
-			t.Fatalf("wrong response code: %v != %v", st.Code(), codes.Canceled)
-		}
+		checkError(t, err, codes.Canceled)
 	})
 }
 
@@ -610,6 +572,7 @@ func testFullDuplexBidiStream(t *testing.T, cli TestServiceClient) {
 		}
 
 		reqMsg.Code = int32(codes.DataLoss)
+		reqMsg.ErrorDetails = testErrorDetails
 		err = bidi.Send(reqMsg)
 		if err != nil {
 			t.Fatalf("sending message #2 failed: %v", err)
@@ -621,13 +584,7 @@ func testFullDuplexBidiStream(t *testing.T, cli TestServiceClient) {
 		}
 
 		_, err = bidi.Recv()
-		st, ok := status.FromError(err)
-		if !ok {
-			t.Fatalf("wrong type of error")
-		}
-		if st.Code() != codes.DataLoss {
-			t.Fatalf("wrong response code: %v != %v", st.Code(), codes.DataLoss)
-		}
+		checkError(t, err, codes.DataLoss, testErrorMessages...)
 	})
 
 	t.Run("timeout", func(t *testing.T) {
@@ -651,13 +608,7 @@ func testFullDuplexBidiStream(t *testing.T, cli TestServiceClient) {
 		}
 
 		_, err = bidi.Recv()
-		st, ok := status.FromError(err)
-		if !ok {
-			t.Fatalf("wrong type of error")
-		}
-		if st.Code() != codes.DeadlineExceeded {
-			t.Fatalf("wrong response code: %v != %v", st.Code(), codes.DeadlineExceeded)
-		}
+		checkError(t, err, codes.DeadlineExceeded)
 	})
 
 	t.Run("canceled", func(t *testing.T) {
@@ -683,13 +634,7 @@ func testFullDuplexBidiStream(t *testing.T, cli TestServiceClient) {
 		}
 
 		_, err = bidi.Recv()
-		st, ok := status.FromError(err)
-		if !ok {
-			t.Fatalf("wrong type of error")
-		}
-		if st.Code() != codes.Canceled {
-			t.Fatalf("wrong response code: %v != %v", st.Code(), codes.Canceled)
-		}
+		checkError(t, err, codes.Canceled)
 	})
 }
 
@@ -713,6 +658,25 @@ func checkMdHeaders(t *testing.T, expected map[string]string, actual metadata.MD
 		v2, ok := actual[k]
 		if !ok || len(v2) != 1 || v2[0] != v {
 			t.Fatalf("wrong headers echoed back: expecting header %s to be [%s], instead was %v", k, v, v2)
+		}
+	}
+}
+
+func checkError(t *testing.T, err error, expectedCode codes.Code, expectedDetails ...proto.Message) {
+	st, ok := status.FromError(err)
+	if !ok {
+		t.Fatalf("wrong type of error")
+	}
+	if st.Code() != expectedCode {
+		t.Fatalf("wrong response code: %v != %v", st.Code(), expectedCode)
+	}
+	actualDetails := st.Details()
+	if len(actualDetails) != len(expectedDetails) {
+		t.Fatalf("wrong number of error details: %v != %v", len(actualDetails), len(expectedDetails))
+	}
+	for i, msg := range actualDetails {
+		if !proto.Equal(msg.(proto.Message), expectedDetails[i]) {
+			t.Fatalf("wrong error detail message at index %d: %v != %v", i, msg, expectedDetails[i])
 		}
 	}
 }
