@@ -8,17 +8,13 @@ import (
 
 	"github.com/golang/protobuf/ptypes/empty"
 	"golang.org/x/net/context"
+	spb "google.golang.org/genproto/googleapis/rpc/status"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 )
 
-// TestServer has default responses to the various kinds of methods. It's
-// behavior can be overridden by SetDelegate and SetInterceptorDelegate,
-// which allow test code to insert a custom server interceptor and/or
-// custom server handler, which will be invoked instead of the default
-// behavior.
+// TestServer has default responses to the various kinds of methods.
 type TestServer struct{}
 
 func (s *TestServer) Unary(ctx context.Context, req *Message) (*Message, error) {
@@ -28,13 +24,22 @@ func (s *TestServer) Unary(ctx context.Context, req *Message) (*Message, error) 
 	grpc.SetHeader(ctx, metadata.New(req.Headers))
 	grpc.SetTrailer(ctx, metadata.New(req.Trailers))
 	if req.Code != 0 {
-		return nil, status.Error(codes.Code(req.Code), "error")
+		return nil, statusFromRequest(req)
 	}
 	md, _ := metadata.FromIncomingContext(ctx)
 	return &Message{
 		Headers: asMap(md),
 		Payload: req.Payload,
 	}, nil
+}
+
+func statusFromRequest(req *Message) error {
+	statProto := spb.Status{
+		Code:    req.Code,
+		Message: "error",
+		Details: req.ErrorDetails,
+	}
+	return status.FromProto(&statProto).Err()
 }
 
 func (s *TestServer) ClientStream(cs TestService_ClientStreamServer) error {
@@ -64,7 +69,7 @@ func (s *TestServer) ClientStream(cs TestService_ClientStreamServer) error {
 	}
 	cs.SetTrailer(metadata.New(req.Trailers))
 	if req.Code != 0 {
-		return status.Error(codes.Code(req.Code), "error")
+		return statusFromRequest(req)
 	}
 	md, _ := metadata.FromIncomingContext(cs.Context())
 	return cs.SendAndClose(&Message{
@@ -93,7 +98,7 @@ func (s *TestServer) ServerStream(req *Message, ss TestService_ServerStreamServe
 	}
 	ss.SetTrailer(metadata.New(req.Trailers))
 	if req.Code != 0 {
-		return status.Error(codes.Code(req.Code), "error")
+		return statusFromRequest(req)
 	}
 	return nil
 }
@@ -148,7 +153,7 @@ func (s *TestServer) BidiStream(str TestService_BidiStreamServer) error {
 	}
 	str.SetTrailer(metadata.New(req.Trailers))
 	if req.Code != 0 {
-		return status.Error(codes.Code(req.Code), "error")
+		return statusFromRequest(req)
 	}
 	return nil
 }

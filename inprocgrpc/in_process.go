@@ -27,8 +27,8 @@ import (
 
 // frame is the unit of communication with gRPC streams. Frames are used to send
 // headers, messages, trailers, and errors. (In a normal gRPC client, there is
-// error frame as the error is instead communicated with trailers. But having it
-// be a separate frame type for in-process makes the implementation simpler.)
+// no error frame as the error is instead communicated with trailers. But having
+// it be a separate frame type for in-process makes the implementation simpler.)
 //
 // Client streams only send data frames. Client streams cannot include trailers
 // or an error, and request headers are communicated separately (via context

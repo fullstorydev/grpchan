@@ -2,10 +2,12 @@ package httpgrpc
 
 import (
 	"bytes"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"io/ioutil"
 	"net/http"
+	"net/textproto"
 	"net/url"
 	"path"
 	"runtime"
@@ -15,7 +17,9 @@ import (
 	"time"
 
 	"github.com/golang/protobuf/proto"
+	"github.com/golang/protobuf/ptypes/any"
 	"golang.org/x/net/context"
+	spb "google.golang.org/genproto/googleapis/rpc/status"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
@@ -35,6 +39,8 @@ type Channel struct {
 }
 
 var _ grpchan.Channel = (*Channel)(nil)
+
+var grpcDetailsHeader = textproto.CanonicalMIMEHeaderKey("X-GRPC-Details")
 
 // Invoke executes a unary RPC, sending the given req message and populating the
 // given resp with the server's reply. Client stubs that use HTTP 1.1 should use
@@ -62,19 +68,8 @@ func (ch *Channel) Invoke(ctx context.Context, methodName string, req, resp inte
 		return statusFromContextError(err)
 	}
 
-	code := codeFromHttpStatus(reply.StatusCode)
-	msg := reply.Status
-	codeStrs := strings.SplitN(reply.Header.Get("X-GRPC-Status"), ":", 2)
-	if len(codeStrs) > 0 && codeStrs[0] != "" {
-		if c, err := strconv.ParseInt(codeStrs[0], 10, 32); err == nil {
-			code = codes.Code(c)
-		}
-		if len(codeStrs) > 1 {
-			msg = codeStrs[1]
-		}
-	}
-	if code != codes.OK {
-		return status.Error(code, msg)
+	if stat := statFromResponse(reply); stat.Code() != codes.OK {
+		return stat.Err()
 	}
 
 	// we fire up a goroutine to read the response so that we can properly
@@ -212,7 +207,12 @@ func (cs *clientStream) readErrorIfDone() (bool, error) {
 	if cs.tr.Code == int32(codes.OK) {
 		return true, io.EOF
 	}
-	return true, status.Error(codes.Code(cs.tr.Code), cs.tr.Message)
+	statProto := spb.Status{
+		Code:    cs.tr.Code,
+		Message: cs.tr.Message,
+		Details: cs.tr.Details,
+	}
+	return true, status.FromProto(&statProto).Err()
 }
 
 func (cs *clientStream) SendMsg(m interface{}) error {
@@ -336,10 +336,12 @@ func (cs *clientStream) doHttpCall(transport http.RoundTripper, req *http.Reques
 
 	onReady(nil, md)
 
-	code := codeFromHttpStatus(reply.StatusCode)
-	if code != codes.OK {
-		cs.tr.Code = int32(code)
-		cs.tr.Message = reply.Status
+	stat := statFromResponse(reply)
+	if stat.Code() != codes.OK {
+		statProto := stat.Proto()
+		cs.tr.Code = statProto.Code
+		cs.tr.Message = statProto.Message
+		cs.tr.Details = statProto.Details
 		return
 	}
 
@@ -414,4 +416,45 @@ func headersFromContext(ctx context.Context) http.Header {
 		h.Set("GRPC-Timeout", fmt.Sprintf("%dm", millis))
 	}
 	return h
+}
+
+func statFromResponse(reply *http.Response) *status.Status {
+	code := codeFromHttpStatus(reply.StatusCode)
+	msg := reply.Status
+	codeStrs := strings.SplitN(reply.Header.Get("X-GRPC-Status"), ":", 2)
+	if len(codeStrs) > 0 && codeStrs[0] != "" {
+		if c, err := strconv.ParseInt(codeStrs[0], 10, 32); err == nil {
+			code = codes.Code(c)
+		}
+		if len(codeStrs) > 1 {
+			msg = codeStrs[1]
+		}
+	}
+	if code != codes.OK {
+		var details []*any.Any
+		if detailHeaders := reply.Header[grpcDetailsHeader]; len(detailHeaders) > 0 {
+			details = make([]*any.Any, 0, len(detailHeaders))
+			for _, d := range detailHeaders {
+				b, err := base64.RawURLEncoding.DecodeString(d)
+				if err != nil {
+					continue
+				}
+				var msg any.Any
+				if err := proto.Unmarshal(b, &msg); err != nil {
+					continue
+				}
+				details = append(details, &msg)
+			}
+		}
+		if len(details) > 0 {
+			statProto := spb.Status{
+				Code:    int32(code),
+				Message: msg,
+				Details: details,
+			}
+			return status.FromProto(&statProto)
+		}
+		return status.New(code, msg)
+	}
+	return nil
 }

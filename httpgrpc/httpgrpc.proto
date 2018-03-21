@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package fullstorydev.grpchan.httpgrpc;
 
+import "google/protobuf/any.proto";
+
 option go_package = "httpgrpc";
 
 // HttpTrailer is the last message sent in a streaming GRPC-over-HTTP
@@ -11,6 +13,7 @@ message HttpTrailer {
 	map<string, TrailerValues> metadata = 1;
 	int32 code = 2;
 	string message = 3;
+	repeated google.protobuf.Any details = 4;
 }
 
 message TrailerValues {
