@@ -218,8 +218,8 @@ func (c *Channel) Invoke(ctx context.Context, method string, req, resp interface
 			sts.finish()
 			close(ch)
 		}()
-		ctx := grpc.NewContextWithServerTransportStream(ctx, &sts)
-		v, err := md.Handler(handler, makeServerContext(ctx), codec, c.unaryInterceptor)
+		ctx := grpc.NewContextWithServerTransportStream(makeServerContext(ctx), &sts)
+		v, err := md.Handler(handler, ctx, codec, c.unaryInterceptor)
 		if h := sts.headers(); len(h) > 0 {
 			ch <- frame{headers: h}
 		}

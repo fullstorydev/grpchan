@@ -95,8 +95,9 @@ func testUnary(t *testing.T, cli TestServiceClient) {
 		Trailers: testMdTrailers,
 	}
 	t.Run("success", func(t *testing.T) {
+		var hdr, tlr metadata.MD
 		req := reqPrototype
-		rsp, err := cli.Unary(ctx, &req)
+		rsp, err := cli.Unary(ctx, &req, grpc.Header(&hdr), grpc.Trailer(&tlr))
 		if err != nil {
 			t.Fatalf("RPC failed: %v", err)
 		}
@@ -104,6 +105,9 @@ func testUnary(t *testing.T, cli TestServiceClient) {
 			t.Fatalf("wrong payload returned: expecting %v; got %v", testPayload, rsp.Payload)
 		}
 		checkRequestHeaders(t, testOutgoingMd, rsp.Headers)
+
+		checkMetadata(t, testMdHeaders, hdr, "header")
+		checkMetadata(t, testMdTrailers, tlr, "trailer")
 	})
 
 	t.Run("failure", func(t *testing.T) {
@@ -664,14 +668,14 @@ func checkResponseHeaders(t *testing.T, cs grpc.ClientStream, md map[string]stri
 	if err != nil {
 		t.Fatalf("failed to get header metadata: %v", err)
 	}
-	checkMdHeaders(t, md, h, "header")
+	checkMetadata(t, md, h, "header")
 }
 
 func checkResponseTrailers(t *testing.T, cs grpc.ClientStream, md map[string]string) {
-	checkMdHeaders(t, md, cs.Trailer(), "trailer")
+	checkMetadata(t, md, cs.Trailer(), "trailer")
 }
 
-func checkMdHeaders(t *testing.T, expected map[string]string, actual metadata.MD, name string) {
+func checkMetadata(t *testing.T, expected map[string]string, actual metadata.MD, name string) {
 	// we don't just do a strict equals check because the actual headers
 	// echoed back could have extra headers that were added implicitly
 	// by the GRPC-over-HTTP client (such as GRPC-Timeout, Content-Type, etc).
