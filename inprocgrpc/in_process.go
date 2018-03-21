@@ -564,6 +564,10 @@ func (s *inProcessServerStream) finish(err error) {
 		s.mu.Unlock()
 	}()
 
+	if s.state == streamStateHeaders && len(s.headers) > 0 {
+		writeMessage(s.ctx, nil, s.responses, frame{headers: s.headers})
+	}
+
 	if len(s.trailers) > 0 {
 		writeMessage(s.ctx, nil, s.responses, frame{trailers: s.trailers})
 	}

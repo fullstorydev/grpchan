@@ -11,6 +11,7 @@ import (
 	"github.com/golang/protobuf/ptypes/any"
 	"github.com/golang/protobuf/ptypes/struct"
 	"golang.org/x/net/context"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
@@ -87,58 +88,54 @@ func init() {
 }
 
 func testUnary(t *testing.T, cli TestServiceClient) {
-	// NB(jh): implementations of channel.Channel currently can't support
-	// response headers and trailers for unary RPCs due to roadblocks in
-	// the underlying gRPC APIs:
-	//  * https://github.com/grpc/grpc-go/issues/1494
-	//  * https://github.com/grpc/grpc-go/issues/1495
-	//  * https://github.com/grpc/grpc-go/issues/1802
-
 	ctx := metadata.NewOutgoingContext(context.Background(), metadata.New(testOutgoingMd))
-
+	reqPrototype := Message{
+		Payload:  testPayload,
+		Headers:  testMdHeaders,
+		Trailers: testMdTrailers,
+	}
 	t.Run("success", func(t *testing.T) {
-		rsp, err := cli.Unary(ctx, &Message{
-			Payload: testPayload,
-		})
+		req := reqPrototype
+		rsp, err := cli.Unary(ctx, &req)
 		if err != nil {
 			t.Fatalf("RPC failed: %v", err)
 		}
 		if !bytes.Equal(testPayload, rsp.Payload) {
 			t.Fatalf("wrong payload returned: expecting %v; got %v", testPayload, rsp.Payload)
 		}
-		checkHeaders(t, testOutgoingMd, rsp.Headers)
+		checkRequestHeaders(t, testOutgoingMd, rsp.Headers)
 	})
 
 	t.Run("failure", func(t *testing.T) {
-		_, err := cli.Unary(ctx, &Message{
-			Code:         int32(codes.AlreadyExists),
-			ErrorDetails: testErrorDetails,
-		})
+		req := reqPrototype
+		req.Code = int32(codes.AlreadyExists)
+		req.ErrorDetails = testErrorDetails
+		_, err := cli.Unary(ctx, &req)
 		checkError(t, err, codes.AlreadyExists, testErrorMessages...)
 	})
 
 	t.Run("timeout", func(t *testing.T) {
+		req := reqPrototype
+		req.DelayMillis = 500
 		tctx, _ := context.WithTimeout(ctx, 100*time.Millisecond)
-		_, err := cli.Unary(tctx, &Message{
-			DelayMillis: 500,
-		})
+		_, err := cli.Unary(tctx, &req)
 		checkError(t, err, codes.DeadlineExceeded)
 	})
 
 	t.Run("canceled", func(t *testing.T) {
+		req := reqPrototype
+		req.DelayMillis = 500
 		cctx, cancel := context.WithCancel(ctx)
 		time.AfterFunc(100*time.Millisecond, cancel)
 
-		_, err := cli.Unary(cctx, &Message{
-			DelayMillis: 500,
-		})
+		_, err := cli.Unary(cctx, &req)
 		checkError(t, err, codes.Canceled)
 	})
 }
 
 func testClientStream(t *testing.T, cli TestServiceClient) {
 	ctx := metadata.NewOutgoingContext(context.Background(), metadata.New(testOutgoingMd))
-	reqMsg := &Message{
+	reqPrototype := Message{
 		Payload:  testPayload,
 		Headers:  testMdHeaders,
 		Trailers: testMdTrailers,
@@ -149,18 +146,18 @@ func testClientStream(t *testing.T, cli TestServiceClient) {
 		if err != nil {
 			t.Fatalf("RPC failed: %v", err)
 		}
-
-		err = cs.Send(reqMsg)
+		req := reqPrototype
+		err = cs.Send(&req)
 		if err != nil {
 			t.Fatalf("sending message #1 failed: %v", err)
 		}
 
-		err = cs.Send(reqMsg)
+		err = cs.Send(&req)
 		if err != nil {
 			t.Fatalf("sending message #2 failed: %v", err)
 		}
 
-		err = cs.Send(reqMsg)
+		err = cs.Send(&req)
 		if err != nil {
 			t.Fatalf("sending message #3 failed: %v", err)
 		}
@@ -175,44 +172,43 @@ func testClientStream(t *testing.T, cli TestServiceClient) {
 		if m.Count != 3 {
 			t.Fatalf("wrong count returned: expecting %d; got %d", 3, m.Count)
 		}
-		checkHeaders(t, testOutgoingMd, m.Headers)
+		checkRequestHeaders(t, testOutgoingMd, m.Headers)
 
-		h, err := cs.Header()
-		if err != nil {
-			t.Fatalf("failed to get header metadata: %v", err)
-		}
-		checkMdHeaders(t, testMdHeaders, h)
-		checkMdHeaders(t, testMdTrailers, cs.Trailer())
+		checkResponseMetadata(t, cs, testMdHeaders, testMdTrailers)
 	})
 
 	t.Run("failure", func(t *testing.T) {
+		req := reqPrototype
 		cs, err := cli.ClientStream(ctx)
 		if err != nil {
 			t.Fatalf("RPC failed: %v", err)
 		}
 
-		reqMsg.Code = int32(codes.ResourceExhausted)
-		reqMsg.ErrorDetails = testErrorDetails
-		err = cs.Send(reqMsg)
+		req.Code = int32(codes.ResourceExhausted)
+		req.ErrorDetails = testErrorDetails
+		err = cs.Send(&req)
 		if err != nil {
 			t.Fatalf("sending message failed: %v", err)
 		}
 
 		_, err = cs.CloseAndRecv()
 		checkError(t, err, codes.ResourceExhausted, testErrorMessages...)
+
+		checkResponseMetadata(t, cs, testMdHeaders, testMdTrailers)
 	})
 
 	t.Run("timeout", func(t *testing.T) {
+		req := reqPrototype
 		tctx, _ := context.WithTimeout(ctx, 100*time.Millisecond)
 		cs, err := cli.ClientStream(tctx)
 		if err != nil {
 			t.Fatalf("RPC failed: %v", err)
 		}
 
-		reqMsg.Code = int32(codes.OK)
-		reqMsg.DelayMillis = 500
+		req.Code = int32(codes.OK)
+		req.DelayMillis = 500
 
-		err = cs.Send(reqMsg)
+		err = cs.Send(&req)
 		if err != nil {
 			t.Fatalf("sending message failed: %v", err)
 		}
@@ -222,6 +218,7 @@ func testClientStream(t *testing.T, cli TestServiceClient) {
 	})
 
 	t.Run("canceled", func(t *testing.T) {
+		req := reqPrototype
 		cctx, cancel := context.WithCancel(ctx)
 		time.AfterFunc(100*time.Millisecond, cancel)
 
@@ -230,10 +227,10 @@ func testClientStream(t *testing.T, cli TestServiceClient) {
 			t.Fatalf("RPC failed: %v", err)
 		}
 
-		reqMsg.Code = int32(codes.OK)
-		reqMsg.DelayMillis = 500
+		req.Code = int32(codes.OK)
+		req.DelayMillis = 500
 
-		err = cs.Send(reqMsg)
+		err = cs.Send(&req)
 		if err != nil {
 			t.Fatalf("sending message failed: %v", err)
 		}
@@ -245,7 +242,7 @@ func testClientStream(t *testing.T, cli TestServiceClient) {
 
 func testServerStream(t *testing.T, cli TestServiceClient) {
 	ctx := metadata.NewOutgoingContext(context.Background(), metadata.New(testOutgoingMd))
-	reqMsg := &Message{
+	reqPrototype := Message{
 		Payload:  testPayload,
 		Count:    5,
 		Headers:  testMdHeaders,
@@ -253,16 +250,13 @@ func testServerStream(t *testing.T, cli TestServiceClient) {
 	}
 
 	t.Run("success", func(t *testing.T) {
-		ss, err := cli.ServerStream(ctx, reqMsg)
+		req := reqPrototype
+		ss, err := cli.ServerStream(ctx, &req)
 		if err != nil {
 			t.Fatalf("RPC failed: %v", err)
 		}
 
-		h, err := ss.Header()
-		if err != nil {
-			t.Fatalf("failed to get header metadata: %v", err)
-		}
-		checkMdHeaders(t, testMdHeaders, h)
+		checkResponseHeaders(t, ss, testMdHeaders)
 
 		for i := 0; i < 5; i++ {
 			m, err := ss.Recv()
@@ -272,24 +266,27 @@ func testServerStream(t *testing.T, cli TestServiceClient) {
 			if !bytes.Equal(testPayload, m.Payload) {
 				t.Fatalf("wrong payload returned: expecting %v; got %v", testPayload, m.Payload)
 			}
-			checkHeaders(t, testOutgoingMd, m.Headers)
+			checkRequestHeaders(t, testOutgoingMd, m.Headers)
 		}
 		_, err = ss.Recv()
 		if err != io.EOF {
 			t.Fatalf("expected EOF; got %v", err)
 		}
 
-		checkMdHeaders(t, testMdTrailers, ss.Trailer())
+		checkResponseTrailers(t, ss, testMdTrailers)
 	})
 
 	t.Run("failure", func(t *testing.T) {
-		reqMsg.Count = 2
-		reqMsg.Code = int32(codes.FailedPrecondition)
-		reqMsg.ErrorDetails = testErrorDetails
-		ss, err := cli.ServerStream(ctx, reqMsg)
+		req := reqPrototype
+		req.Count = 2
+		req.Code = int32(codes.FailedPrecondition)
+		req.ErrorDetails = testErrorDetails
+		ss, err := cli.ServerStream(ctx, &req)
 		if err != nil {
 			t.Fatalf("RPC failed: %v", err)
 		}
+
+		checkResponseHeaders(t, ss, testMdHeaders)
 
 		for i := 0; i < 2; i++ {
 			m, err := ss.Recv()
@@ -299,19 +296,22 @@ func testServerStream(t *testing.T, cli TestServiceClient) {
 			if !bytes.Equal(testPayload, m.Payload) {
 				t.Fatalf("wrong payload returned: expecting %v; got %v", testPayload, m.Payload)
 			}
-			checkHeaders(t, testOutgoingMd, m.Headers)
+			checkRequestHeaders(t, testOutgoingMd, m.Headers)
 		}
 		_, err = ss.Recv()
 		checkError(t, err, codes.FailedPrecondition, testErrorMessages...)
+
+		checkResponseTrailers(t, ss, testMdTrailers)
 	})
 
 	t.Run("timeout", func(t *testing.T) {
+		req := reqPrototype
 		tctx, _ := context.WithTimeout(ctx, 100*time.Millisecond)
 
-		reqMsg.Code = int32(codes.OK)
-		reqMsg.DelayMillis = 500
+		req.Code = int32(codes.OK)
+		req.DelayMillis = 500
 
-		ss, err := cli.ServerStream(tctx, reqMsg)
+		ss, err := cli.ServerStream(tctx, &req)
 		if err != nil {
 			t.Fatalf("RPC failed: %v", err)
 		}
@@ -321,13 +321,14 @@ func testServerStream(t *testing.T, cli TestServiceClient) {
 	})
 
 	t.Run("canceled", func(t *testing.T) {
+		req := reqPrototype
 		cctx, cancel := context.WithCancel(ctx)
 		time.AfterFunc(100*time.Millisecond, cancel)
 
-		reqMsg.Code = int32(codes.OK)
-		reqMsg.DelayMillis = 500
+		req.Code = int32(codes.OK)
+		req.DelayMillis = 500
 
-		ss, err := cli.ServerStream(cctx, reqMsg)
+		ss, err := cli.ServerStream(cctx, &req)
 		if err != nil {
 			t.Fatalf("RPC failed: %v", err)
 		}
@@ -339,46 +340,44 @@ func testServerStream(t *testing.T, cli TestServiceClient) {
 
 func testHalfDuplexBidiStream(t *testing.T, cli TestServiceClient) {
 	ctx := metadata.NewOutgoingContext(context.Background(), metadata.New(testOutgoingMd))
-	reqMsg := &Message{
-		Payload: testPayload,
-		Count:   -1, // enables half-duplex mode in server
-		Headers: testMdHeaders,
+	reqPrototype := Message{
+		Payload:  testPayload,
+		Count:    -1, // enables half-duplex mode in server
+		Headers:  testMdHeaders,
+		Trailers: testMdTrailers,
 	}
 
 	t.Run("success", func(t *testing.T) {
+		req := reqPrototype
 		bidi, err := cli.BidiStream(ctx)
 		if err != nil {
 			t.Fatalf("RPC failed: %v", err)
 		}
 
-		err = bidi.Send(reqMsg)
+		err = bidi.Send(&req)
 		if err != nil {
 			t.Fatalf("sending message #1 failed: %v", err)
 		}
-		reqMsg.Headers = nil
+		req.Headers = nil
 
-		err = bidi.Send(reqMsg)
+		err = bidi.Send(&req)
 		if err != nil {
 			t.Fatalf("sending message #2 failed: %v", err)
 		}
 
-		reqMsg.Trailers = testMdTrailers
-		err = bidi.Send(reqMsg)
+		req.Trailers = testMdTrailers
+		err = bidi.Send(&req)
 		if err != nil {
 			t.Fatalf("sending message #3 failed: %v", err)
 		}
-		reqMsg.Trailers = nil
+		req.Trailers = nil
 
 		err = bidi.CloseSend()
 		if err != nil {
 			t.Fatalf("closing send-side of RPC failed: %v", err)
 		}
 
-		md, err := bidi.Header()
-		if err != nil {
-			t.Fatalf("failed to get header metadata: %v", err)
-		}
-		checkMdHeaders(t, testMdHeaders, md)
+		checkResponseHeaders(t, bidi, testMdHeaders)
 
 		m, err := bidi.Recv()
 		if err != nil {
@@ -387,7 +386,7 @@ func testHalfDuplexBidiStream(t *testing.T, cli TestServiceClient) {
 		if !bytes.Equal(testPayload, m.Payload) {
 			t.Fatalf("wrong payload in message #1: expecting %v; got %v", testPayload, m.Payload)
 		}
-		checkHeaders(t, testOutgoingMd, m.Headers)
+		checkRequestHeaders(t, testOutgoingMd, m.Headers)
 
 		m, err = bidi.Recv()
 		if err != nil {
@@ -410,24 +409,24 @@ func testHalfDuplexBidiStream(t *testing.T, cli TestServiceClient) {
 			t.Fatalf("expected EOF; got %v", err)
 		}
 
-		md = bidi.Trailer()
-		checkMdHeaders(t, testMdTrailers, md)
+		checkResponseTrailers(t, bidi, testMdTrailers)
 	})
 
 	t.Run("failure", func(t *testing.T) {
+		req := reqPrototype
 		bidi, err := cli.BidiStream(ctx)
 		if err != nil {
 			t.Fatalf("RPC failed: %v", err)
 		}
 
-		err = bidi.Send(reqMsg)
+		err = bidi.Send(&req)
 		if err != nil {
 			t.Fatalf("sending message #1 failed: %v", err)
 		}
 
-		reqMsg.Code = int32(codes.DataLoss)
-		reqMsg.ErrorDetails = testErrorDetails
-		err = bidi.Send(reqMsg)
+		req.Code = int32(codes.DataLoss)
+		req.ErrorDetails = testErrorDetails
+		err = bidi.Send(&req)
 		if err != nil {
 			t.Fatalf("sending message #2 failed: %v", err)
 		}
@@ -436,6 +435,8 @@ func testHalfDuplexBidiStream(t *testing.T, cli TestServiceClient) {
 		if err != nil {
 			t.Fatalf("closing send-side of RPC failed: %v", err)
 		}
+
+		checkResponseHeaders(t, bidi, testMdHeaders)
 
 		m, err := bidi.Recv()
 		if err != nil {
@@ -447,19 +448,22 @@ func testHalfDuplexBidiStream(t *testing.T, cli TestServiceClient) {
 
 		_, err = bidi.Recv()
 		checkError(t, err, codes.DataLoss, testErrorMessages...)
+
+		checkResponseTrailers(t, bidi, testMdTrailers)
 	})
 
 	t.Run("timeout", func(t *testing.T) {
+		req := reqPrototype
 		tctx, _ := context.WithTimeout(ctx, 100*time.Millisecond)
 		bidi, err := cli.BidiStream(tctx)
 		if err != nil {
 			t.Fatalf("RPC failed: %v", err)
 		}
 
-		reqMsg.Code = int32(codes.OK)
-		reqMsg.DelayMillis = 500
+		req.Code = int32(codes.OK)
+		req.DelayMillis = 500
 
-		err = bidi.Send(reqMsg)
+		err = bidi.Send(&req)
 		if err != nil {
 			t.Fatalf("sending message failed: %v", err)
 		}
@@ -474,6 +478,7 @@ func testHalfDuplexBidiStream(t *testing.T, cli TestServiceClient) {
 	})
 
 	t.Run("canceled", func(t *testing.T) {
+		req := reqPrototype
 		cctx, cancel := context.WithCancel(ctx)
 		time.AfterFunc(100*time.Millisecond, cancel)
 
@@ -482,10 +487,10 @@ func testHalfDuplexBidiStream(t *testing.T, cli TestServiceClient) {
 			t.Fatalf("RPC failed: %v", err)
 		}
 
-		reqMsg.Code = int32(codes.OK)
-		reqMsg.DelayMillis = 500
+		req.Code = int32(codes.OK)
+		req.DelayMillis = 500
 
-		err = bidi.Send(reqMsg)
+		err = bidi.Send(&req)
 		if err != nil {
 			t.Fatalf("sending message failed: %v", err)
 		}
@@ -502,30 +507,27 @@ func testHalfDuplexBidiStream(t *testing.T, cli TestServiceClient) {
 
 func testFullDuplexBidiStream(t *testing.T, cli TestServiceClient) {
 	ctx := metadata.NewOutgoingContext(context.Background(), metadata.New(testOutgoingMd))
-	reqMsg := &Message{
+	reqPrototype := Message{
 		Payload:  testPayload,
 		Headers:  testMdHeaders,
 		Trailers: testMdTrailers,
 	}
 
 	t.Run("success", func(t *testing.T) {
+		req := reqPrototype
 		bidi, err := cli.BidiStream(ctx)
 		if err != nil {
 			t.Fatalf("RPC failed: %v", err)
 		}
 
 		for i := 0; i < 3; i++ {
-			err = bidi.Send(reqMsg)
+			err = bidi.Send(&req)
 			if err != nil {
 				t.Fatalf("sending message #%d failed: %v", i+1, err)
 			}
 
 			if i == 0 {
-				md, err := bidi.Header()
-				if err != nil {
-					t.Fatalf("failed to get header metadata: %v", err)
-				}
-				checkMdHeaders(t, testMdHeaders, md)
+				checkResponseHeaders(t, bidi, testMdHeaders)
 			}
 
 			m, err := bidi.Recv()
@@ -535,7 +537,7 @@ func testFullDuplexBidiStream(t *testing.T, cli TestServiceClient) {
 			if !bytes.Equal(testPayload, m.Payload) {
 				t.Fatalf("wrong payload in message #%d: expecting %v; got %v", i+1, testPayload, m.Payload)
 			}
-			checkHeaders(t, testOutgoingMd, m.Headers)
+			checkRequestHeaders(t, testOutgoingMd, m.Headers)
 		}
 
 		err = bidi.CloseSend()
@@ -548,20 +550,22 @@ func testFullDuplexBidiStream(t *testing.T, cli TestServiceClient) {
 			t.Fatalf("expected EOF; got %v", err)
 		}
 
-		md := bidi.Trailer()
-		checkMdHeaders(t, testMdTrailers, md)
+		checkResponseTrailers(t, bidi, testMdTrailers)
 	})
 
 	t.Run("failure", func(t *testing.T) {
+		req := reqPrototype
 		bidi, err := cli.BidiStream(ctx)
 		if err != nil {
 			t.Fatalf("RPC failed: %v", err)
 		}
 
-		err = bidi.Send(reqMsg)
+		err = bidi.Send(&req)
 		if err != nil {
 			t.Fatalf("sending message #1 failed: %v", err)
 		}
+
+		checkResponseHeaders(t, bidi, testMdHeaders)
 
 		m, err := bidi.Recv()
 		if err != nil {
@@ -571,9 +575,9 @@ func testFullDuplexBidiStream(t *testing.T, cli TestServiceClient) {
 			t.Fatalf("wrong payload returned: expecting %v; got %v", testPayload, m.Payload)
 		}
 
-		reqMsg.Code = int32(codes.DataLoss)
-		reqMsg.ErrorDetails = testErrorDetails
-		err = bidi.Send(reqMsg)
+		req.Code = int32(codes.DataLoss)
+		req.ErrorDetails = testErrorDetails
+		err = bidi.Send(&req)
 		if err != nil {
 			t.Fatalf("sending message #2 failed: %v", err)
 		}
@@ -585,19 +589,20 @@ func testFullDuplexBidiStream(t *testing.T, cli TestServiceClient) {
 
 		_, err = bidi.Recv()
 		checkError(t, err, codes.DataLoss, testErrorMessages...)
+
+		checkResponseTrailers(t, bidi, testMdTrailers)
 	})
 
 	t.Run("timeout", func(t *testing.T) {
+		req := reqPrototype
 		tctx, _ := context.WithTimeout(ctx, 100*time.Millisecond)
 		bidi, err := cli.BidiStream(tctx)
 		if err != nil {
 			t.Fatalf("RPC failed: %v", err)
 		}
 
-		reqMsg.Code = int32(codes.OK)
-		reqMsg.DelayMillis = 500
-
-		err = bidi.Send(reqMsg)
+		req.DelayMillis = 500
+		err = bidi.Send(&req)
 		if err != nil {
 			t.Fatalf("sending message failed: %v", err)
 		}
@@ -612,6 +617,7 @@ func testFullDuplexBidiStream(t *testing.T, cli TestServiceClient) {
 	})
 
 	t.Run("canceled", func(t *testing.T) {
+		req := reqPrototype
 		cctx, cancel := context.WithCancel(ctx)
 		time.AfterFunc(100*time.Millisecond, cancel)
 
@@ -620,10 +626,8 @@ func testFullDuplexBidiStream(t *testing.T, cli TestServiceClient) {
 			t.Fatalf("RPC failed: %v", err)
 		}
 
-		reqMsg.Code = int32(codes.OK)
-		reqMsg.DelayMillis = 500
-
-		err = bidi.Send(reqMsg)
+		req.DelayMillis = 500
+		err = bidi.Send(&req)
 		if err != nil {
 			t.Fatalf("sending message failed: %v", err)
 		}
@@ -638,7 +642,7 @@ func testFullDuplexBidiStream(t *testing.T, cli TestServiceClient) {
 	})
 }
 
-func checkHeaders(t *testing.T, expected, actual map[string]string) {
+func checkRequestHeaders(t *testing.T, expected, actual map[string]string) {
 	// we don't just do a strict equals check because the actual headers
 	// echoed back could have extra headers that were added implicitly
 	// by the GRPC-over-HTTP client (such as GRPC-Timeout, Content-Type, etc).
@@ -650,14 +654,31 @@ func checkHeaders(t *testing.T, expected, actual map[string]string) {
 	}
 }
 
-func checkMdHeaders(t *testing.T, expected map[string]string, actual metadata.MD) {
+func checkResponseMetadata(t *testing.T, cs grpc.ClientStream, hdrs map[string]string, tlrs map[string]string) {
+	checkResponseHeaders(t, cs, hdrs)
+	checkResponseTrailers(t, cs, tlrs)
+}
+
+func checkResponseHeaders(t *testing.T, cs grpc.ClientStream, md map[string]string) {
+	h, err := cs.Header()
+	if err != nil {
+		t.Fatalf("failed to get header metadata: %v", err)
+	}
+	checkMdHeaders(t, md, h, "header")
+}
+
+func checkResponseTrailers(t *testing.T, cs grpc.ClientStream, md map[string]string) {
+	checkMdHeaders(t, md, cs.Trailer(), "trailer")
+}
+
+func checkMdHeaders(t *testing.T, expected map[string]string, actual metadata.MD, name string) {
 	// we don't just do a strict equals check because the actual headers
 	// echoed back could have extra headers that were added implicitly
 	// by the GRPC-over-HTTP client (such as GRPC-Timeout, Content-Type, etc).
 	for k, v := range expected {
 		v2, ok := actual[k]
 		if !ok || len(v2) != 1 || v2[0] != v {
-			t.Fatalf("wrong headers echoed back: expecting header %s to be [%s], instead was %v", k, v, v2)
+			t.Fatalf("wrong %ss echoed back: expecting %s %s to be [%s], instead was %v", name, name, k, v, v2)
 		}
 	}
 }
