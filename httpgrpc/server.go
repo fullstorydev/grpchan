@@ -22,6 +22,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/fullstorydev/grpchan"
+	"github.com/fullstorydev/grpchan/internal"
 )
 
 // Mux is a function that can register a gRPC-over-HTTP handler. This is used to
@@ -93,10 +94,10 @@ func HandleMethod(svr interface{}, serviceName string, desc *grpc.MethodDesc, un
 		dec := func(msg interface{}) error {
 			return proto.Unmarshal(req, msg.(proto.Message))
 		}
-		sts := &unaryServerTransportStream{name: fullMethod}
-		resp, err := desc.Handler(svr, grpc.NewContextWithServerTransportStream(ctx, sts), dec, unaryInt)
-		toHeaders(sts.headers(), w.Header(), "")
-		toHeaders(sts.trailers(), w.Header(), "X-GRPC-Trailer-")
+		sts := internal.UnaryServerTransportStream{Name: fullMethod}
+		resp, err := desc.Handler(svr, grpc.NewContextWithServerTransportStream(ctx, &sts), dec, unaryInt)
+		toHeaders(sts.GetHeaders(), w.Header(), "")
+		toHeaders(sts.GetTrailers(), w.Header(), "X-GRPC-Trailer-")
 		if err != nil {
 			st, _ := status.FromError(err)
 			if st.Code() == codes.OK {
@@ -167,8 +168,8 @@ func HandleStream(svr interface{}, serviceName string, desc *grpc.StreamDesc, st
 		w.Header().Set("Content-Type", StreamRpcContentType_V1)
 
 		str := &serverStream{r: r, w: w, respStream: desc.ClientStreams}
-		sts := &serverTransportStream{name: info.FullMethod, stream: str}
-		str.ctx = grpc.NewContextWithServerTransportStream(ctx, sts)
+		sts := internal.ServerTransportStream{Name: info.FullMethod, Stream: str}
+		str.ctx = grpc.NewContextWithServerTransportStream(ctx, &sts)
 		if streamInt != nil {
 			err = streamInt(svr, str, info, desc.Handler)
 		} else {
@@ -239,83 +240,6 @@ func asTrailerProto(md metadata.MD) map[string]*TrailerValues {
 		result[k] = &tvs
 	}
 	return result
-}
-
-type unaryServerTransportStream struct {
-	name string
-
-	mu       sync.Mutex
-	hdrs     metadata.MD
-	hdrsSent bool
-	tlrs     metadata.MD
-	tlrsSent bool
-}
-
-func (sts *unaryServerTransportStream) Method() string {
-	return sts.name
-}
-
-func (sts *unaryServerTransportStream) finish() {
-	sts.mu.Lock()
-	defer sts.mu.Unlock()
-	sts.hdrsSent = true
-	sts.tlrsSent = true
-}
-
-func (sts *unaryServerTransportStream) SetHeader(md metadata.MD) error {
-	sts.mu.Lock()
-	defer sts.mu.Unlock()
-	return sts.setHeaderLocked(md)
-}
-
-func (sts *unaryServerTransportStream) SendHeader(md metadata.MD) error {
-	sts.mu.Lock()
-	defer sts.mu.Unlock()
-	if err := sts.setHeaderLocked(md); err != nil {
-		return err
-	}
-	sts.hdrsSent = true
-	return nil
-}
-
-func (sts *unaryServerTransportStream) setHeaderLocked(md metadata.MD) error {
-	if sts.hdrsSent {
-		return fmt.Errorf("headers already sent")
-	}
-	if sts.hdrs == nil {
-		sts.hdrs = metadata.MD{}
-	}
-	for k, v := range md {
-		sts.hdrs[k] = append(sts.hdrs[k], v...)
-	}
-	return nil
-}
-
-func (sts *unaryServerTransportStream) headers() metadata.MD {
-	sts.mu.Lock()
-	defer sts.mu.Unlock()
-	return sts.hdrs
-}
-
-func (sts *unaryServerTransportStream) SetTrailer(md metadata.MD) error {
-	sts.mu.Lock()
-	defer sts.mu.Unlock()
-	if sts.tlrsSent {
-		return fmt.Errorf("trailers already sent")
-	}
-	if sts.tlrs == nil {
-		sts.tlrs = metadata.MD{}
-	}
-	for k, v := range md {
-		sts.tlrs[k] = append(sts.tlrs[k], v...)
-	}
-	return nil
-}
-
-func (sts *unaryServerTransportStream) trailers() metadata.MD {
-	sts.mu.Lock()
-	defer sts.mu.Unlock()
-	return sts.tlrs
 }
 
 // serverStream implements a server stream over HTTP 1.1.
@@ -466,26 +390,4 @@ func contextFromHeaders(parent context.Context, h http.Header) (context.Context,
 		}
 	}
 	return ctx, nil
-}
-
-type serverTransportStream struct {
-	name   string
-	stream *serverStream
-}
-
-func (sts *serverTransportStream) Method() string {
-	return sts.name
-}
-
-func (sts *serverTransportStream) SetHeader(md metadata.MD) error {
-	return sts.stream.SetHeader(md)
-}
-
-func (sts *serverTransportStream) SendHeader(md metadata.MD) error {
-	return sts.stream.SendHeader(md)
-}
-
-func (sts *serverTransportStream) SetTrailer(md metadata.MD) error {
-	sts.stream.SetTrailer(md)
-	return nil
 }
