@@ -2,6 +2,7 @@ package httpgrpc
 
 import (
 	"bytes"
+	"crypto/tls"
 	"encoding/base64"
 	"fmt"
 	"io"
@@ -22,10 +23,13 @@ import (
 	spb "google.golang.org/genproto/googleapis/rpc/status"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 
 	"github.com/fullstorydev/grpchan"
+	"github.com/fullstorydev/grpchan/internal"
 )
 
 // Channel is used as a connection for GRPC requests issued over HTTP 1.1. The
@@ -46,8 +50,15 @@ var grpcDetailsHeader = textproto.CanonicalMIMEHeaderKey("X-GRPC-Details")
 // given resp with the server's reply. Client stubs that use HTTP 1.1 should use
 // this method instead of grpc.Invoke.
 func (ch *Channel) Invoke(ctx context.Context, methodName string, req, resp interface{}, opts ...grpc.CallOption) error {
-	// TODO(jh): support call options.. somehow?
+	copts := internal.GetCallOptions(opts)
 
+	reqUrl := *ch.BaseURL
+	reqUrl.Path = path.Join(reqUrl.Path, methodName)
+	reqUrlStr := reqUrl.String()
+	ctx, err := internal.ApplyPerRPCCreds(ctx, copts, reqUrlStr, reqUrl.Scheme == "https")
+	if err != nil {
+		return err
+	}
 	h := headersFromContext(ctx)
 	h.Set("Content-Type", UnaryRpcContentType_V1)
 
@@ -56,9 +67,9 @@ func (ch *Channel) Invoke(ctx context.Context, methodName string, req, resp inte
 		return err
 	}
 
-	reqUrl := *ch.BaseURL
-	reqUrl.Path = path.Join(reqUrl.Path, methodName)
-	r, err := http.NewRequest("POST", reqUrl.String(), bytes.NewReader(b))
+	// TODO: enforce max send and receive size in call options
+
+	r, err := http.NewRequest("POST", reqUrlStr, bytes.NewReader(b))
 	if err != nil {
 		return err
 	}
@@ -66,6 +77,17 @@ func (ch *Channel) Invoke(ctx context.Context, methodName string, req, resp inte
 	reply, err := ch.Transport.RoundTrip(r.WithContext(ctx))
 	if err != nil {
 		return statusFromContextError(err)
+	}
+
+	if len(copts.Peer) > 0 {
+		copts.SetPeer(getPeer(ch.BaseURL, r.TLS))
+	}
+
+	// gather headers and trailers
+	if len(copts.Headers) > 0 || len(copts.Trailers) > 0 {
+		if err := setMetadata(reply.Header, copts); err != nil {
+			return err
+		}
 	}
 
 	if stat := statFromResponse(reply); stat.Code() != codes.OK {
@@ -94,7 +116,15 @@ func (ch *Channel) Invoke(ctx context.Context, methodName string, req, resp inte
 // NewStream executes a streaming RPC. Client stubs that use HTTP 1.1 should
 // use this method instead of grpc.NewClientStream.
 func (ch *Channel) NewStream(ctx context.Context, desc *grpc.StreamDesc, methodName string, opts ...grpc.CallOption) (grpc.ClientStream, error) {
-	// TODO(jh): support call options.. somehow?
+	copts := internal.GetCallOptions(opts)
+
+	reqUrl := *ch.BaseURL
+	reqUrl.Path = path.Join(reqUrl.Path, methodName)
+	reqUrlStr := reqUrl.String()
+	ctx, err := internal.ApplyPerRPCCreds(ctx, copts, reqUrlStr, reqUrl.Scheme == "https")
+	if err != nil {
+		return nil, err
+	}
 
 	ctx, cancel := context.WithCancel(ctx)
 
@@ -102,15 +132,13 @@ func (ch *Channel) NewStream(ctx context.Context, desc *grpc.StreamDesc, methodN
 	h.Set("Content-Type", StreamRpcContentType_V1)
 
 	r, w := io.Pipe()
-	reqUrl := *ch.BaseURL
-	reqUrl.Path = path.Join(reqUrl.Path, methodName)
-	req, err := http.NewRequest("POST", reqUrl.String(), r)
+	req, err := http.NewRequest("POST", reqUrlStr, r)
 	if err != nil {
 		return nil, err
 	}
 	req.Header = h
 
-	cs := newClientStream(ctx, cancel, w, desc.ServerStreams)
+	cs := newClientStream(ctx, cancel, w, desc.ServerStreams, copts, ch.BaseURL)
 	// ensure that context is cancelled, even if caller
 	// fails to fully consume or cancel the stream
 	runtime.SetFinalizer(cs, func(*clientStream) { cancel() })
@@ -120,14 +148,56 @@ func (ch *Channel) NewStream(ctx context.Context, desc *grpc.StreamDesc, methodN
 	return cs, nil
 }
 
+func getPeer(baseUrl *url.URL, tls *tls.ConnectionState) *peer.Peer {
+	hostPort := baseUrl.Host
+	if !strings.Contains(hostPort, ":") {
+		if baseUrl.Scheme == "https" {
+			hostPort = hostPort + ":443"
+		} else if baseUrl.Scheme == "http" {
+			hostPort = hostPort + ":80"
+		}
+	}
+	pr := peer.Peer{Addr: strAddr(hostPort)}
+	if tls != nil {
+		pr.AuthInfo = credentials.TLSInfo{State: *tls}
+	}
+	return &pr
+}
+
+func setMetadata(h http.Header, copts *internal.CallOptions) error {
+	hdr, err := asMetadata(h)
+	if err != nil {
+		return err
+	}
+	tlr := metadata.MD{}
+
+	const trailerPrefix = "x-grpc-trailer-"
+
+	for k, v := range hdr {
+		if strings.HasPrefix(strings.ToLower(k), trailerPrefix) {
+			trailerName := k[len(trailerPrefix):]
+			if trailerName != "" {
+				tlr[trailerName] = v
+				delete(hdr, k)
+			}
+		}
+	}
+
+	copts.SetHeaders(hdr)
+	copts.SetTrailers(tlr)
+	return nil
+}
+
 // clientStream implements a client stream over HTTP 1.1. A goroutine sets up the
 // RPC by initiating an HTTP 1.1 request, reading the response, and decoding that
 // response stream into messages which are fed to this stream via the rCh field.
 // Sending messages is handled synchronously, writing to a pipe that feeds the
 // HTTP 1.1 request body.
 type clientStream struct {
-	ctx    context.Context
-	cancel context.CancelFunc
+	ctx     context.Context
+	cancel  context.CancelFunc
+	copts   *internal.CallOptions
+	baseUrl *url.URL
 
 	// respStream is set to indicate whether client expects stream response; unary if false
 	respStream bool
@@ -154,10 +224,12 @@ type clientStream struct {
 	wErr error
 }
 
-func newClientStream(ctx context.Context, cancel context.CancelFunc, w io.WriteCloser, recvStream bool) *clientStream {
+func newClientStream(ctx context.Context, cancel context.CancelFunc, w io.WriteCloser, recvStream bool, copts *internal.CallOptions, baseUrl *url.URL) *clientStream {
 	cs := &clientStream{
 		ctx:        ctx,
 		cancel:     cancel,
+		copts:      copts,
+		baseUrl:    baseUrl,
 		w:          w,
 		respStream: recvStream,
 		rCh:        make(chan []byte),
@@ -176,13 +248,17 @@ func (cs *clientStream) Trailer() metadata.MD {
 	cs.rMu.RLock()
 	defer cs.rMu.RUnlock()
 	if cs.done {
-		md := metadata.MD{}
-		for k, vs := range cs.tr.Metadata {
-			md[k] = vs.Values
-		}
-		return md
+		return metadataFromProto(cs.tr.Metadata)
 	}
 	return nil
+}
+
+func metadataFromProto(trailers map[string]*TrailerValues) metadata.MD {
+	md := metadata.MD{}
+	for k, vs := range trailers {
+		md[k] = vs.Values
+	}
+	return md
 }
 
 func (cs *clientStream) CloseSend() error {
@@ -317,6 +393,9 @@ func (cs *clientStream) doHttpCall(transport http.RoundTripper, req *http.Reques
 	onReady := func(err error, headers metadata.MD) {
 		cs.hdErr = err
 		cs.hd = headers
+		if len(headers) > 0 && len(cs.copts.Headers) > 0 {
+			cs.copts.SetHeaders(headers)
+		}
 		rErr = err
 		cs.ready.Done()
 	}
@@ -328,6 +407,9 @@ func (cs *clientStream) doHttpCall(transport http.RoundTripper, req *http.Reques
 	}
 	defer reply.Body.Close()
 
+	if len(cs.copts.Peer) > 0 {
+		cs.copts.SetPeer(getPeer(cs.baseUrl, reply.TLS))
+	}
 	md, err := asMetadata(reply.Header)
 	if err != nil {
 		onReady(err, nil)
@@ -347,6 +429,8 @@ func (cs *clientStream) doHttpCall(transport http.RoundTripper, req *http.Reques
 
 	counter := 0
 	for {
+		// TODO: enforce max send and receive size in call options
+
 		counter++
 		var sz int32
 		sz, rErr = readSizePreface(reply.Body)
@@ -362,6 +446,9 @@ func (cs *clientStream) doHttpCall(transport http.RoundTripper, req *http.Reques
 				if cs.rErr == io.EOF {
 					cs.rErr = io.ErrUnexpectedEOF
 				}
+			}
+			if len(cs.tr.Metadata) > 0 && len(cs.copts.Trailers) > 0 {
+				cs.copts.SetTrailers(metadataFromProto(cs.tr.Metadata))
 			}
 			return
 		}
@@ -405,7 +492,7 @@ func statusFromContextError(err error) error {
 func headersFromContext(ctx context.Context) http.Header {
 	h := http.Header{}
 	if md, ok := metadata.FromOutgoingContext(ctx); ok {
-		toHeaders(md, h)
+		toHeaders(md, h, "")
 	}
 	if deadline, ok := ctx.Deadline(); ok {
 		timeout := deadline.Sub(time.Now())

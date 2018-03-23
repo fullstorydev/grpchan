@@ -16,10 +16,13 @@ import (
 	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 
 	"github.com/fullstorydev/grpchan"
+	"github.com/fullstorydev/grpchan/internal"
 )
 
 // Mux is a function that can register a gRPC-over-HTTP handler. This is used to
@@ -40,7 +43,7 @@ func HandleServices(mux Mux, basePath string, reg grpchan.HandlerMap, unaryInt g
 	reg.ForEach(func(desc *grpc.ServiceDesc, svr interface{}) {
 		for i := range desc.Methods {
 			md := desc.Methods[i]
-			h := HandleMethod(svr, &md, unaryInt)
+			h := HandleMethod(svr, desc.ServiceName, &md, unaryInt)
 			mux(path.Join(basePath, fmt.Sprintf("%s/%s", desc.ServiceName, md.MethodName)), h)
 		}
 		for i := range desc.Streams {
@@ -53,9 +56,13 @@ func HandleServices(mux Mux, basePath string, reg grpchan.HandlerMap, unaryInt g
 
 // HandleMethod returns an HTTP handler that will handle a unary RPC method
 // by dispatching the given method on the given server.
-func HandleMethod(svr interface{}, desc *grpc.MethodDesc, unaryInt grpc.UnaryServerInterceptor) http.HandlerFunc {
+func HandleMethod(svr interface{}, serviceName string, desc *grpc.MethodDesc, unaryInt grpc.UnaryServerInterceptor) http.HandlerFunc {
+	fullMethod := fmt.Sprintf("/%s/%s", serviceName, desc.MethodName)
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
+		if p := peerFromRequest(r); p != nil {
+			ctx = peer.NewContext(ctx, p)
+		}
 		defer drainAndClose(r.Body)
 		if r.Method != "POST" {
 			w.Header().Set("Allow", "POST")
@@ -87,7 +94,10 @@ func HandleMethod(svr interface{}, desc *grpc.MethodDesc, unaryInt grpc.UnarySer
 		dec := func(msg interface{}) error {
 			return proto.Unmarshal(req, msg.(proto.Message))
 		}
-		resp, err := desc.Handler(svr, ctx, dec, unaryInt)
+		sts := internal.UnaryServerTransportStream{Name: fullMethod}
+		resp, err := desc.Handler(svr, grpc.NewContextWithServerTransportStream(ctx, &sts), dec, unaryInt)
+		toHeaders(sts.GetHeaders(), w.Header(), "")
+		toHeaders(sts.GetTrailers(), w.Header(), "X-GRPC-Trailer-")
 		if err != nil {
 			st, _ := status.FromError(err)
 			if st.Code() == codes.OK {
@@ -130,6 +140,9 @@ func HandleStream(svr interface{}, serviceName string, desc *grpc.StreamDesc, st
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
+		if p := peerFromRequest(r); p != nil {
+			ctx = peer.NewContext(ctx, p)
+		}
 		defer drainAndClose(r.Body)
 		if r.Method != "POST" {
 			w.Header().Set("Allow", "POST")
@@ -154,7 +167,9 @@ func HandleStream(svr interface{}, serviceName string, desc *grpc.StreamDesc, st
 
 		w.Header().Set("Content-Type", StreamRpcContentType_V1)
 
-		str := &serverStream{ctx: ctx, r: r, w: w, respStream: desc.ClientStreams}
+		str := &serverStream{r: r, w: w, respStream: desc.ClientStreams}
+		sts := internal.ServerTransportStream{Name: info.FullMethod, Stream: str}
+		str.ctx = grpc.NewContextWithServerTransportStream(ctx, &sts)
 		if streamInt != nil {
 			err = streamInt(svr, str, info, desc.Handler)
 		} else {
@@ -180,6 +195,14 @@ func HandleStream(svr interface{}, serviceName string, desc *grpc.StreamDesc, st
 
 		writeProtoMessage(w, &tr, true)
 	}
+}
+
+func peerFromRequest(r *http.Request) *peer.Peer {
+	pr := peer.Peer{Addr: strAddr(r.RemoteAddr)}
+	if r.TLS != nil {
+		pr.AuthInfo = credentials.TLSInfo{State: *r.TLS}
+	}
+	return &pr
 }
 
 func drainAndClose(r io.ReadCloser) error {
@@ -244,7 +267,7 @@ func (s *serverStream) SetHeader(md metadata.MD) error {
 }
 
 func (s *serverStream) SendHeader(md metadata.MD) error {
-	return s.setHeader(md, false)
+	return s.setHeader(md, true)
 }
 
 func (s *serverStream) setHeader(md metadata.MD, send bool) error {
@@ -256,7 +279,7 @@ func (s *serverStream) setHeader(md metadata.MD, send bool) error {
 	}
 
 	h := s.w.Header()
-	toHeaders(md, h)
+	toHeaders(md, h, "")
 
 	if send {
 		s.w.WriteHeader(http.StatusOK)

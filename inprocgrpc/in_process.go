@@ -19,6 +19,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 
 	"github.com/fullstorydev/grpchan"
@@ -153,15 +154,38 @@ func (c *Channel) WithServerStreamInterceptor(interceptor grpc.StreamServerInter
 	return c
 }
 
-func (c *Channel) Invoke(ctx context.Context, method string, req, resp interface{}, opts ...grpc.CallOption) error {
-	// TODO(jh): support call options.. somehow?
+var inprocessPeer = peer.Peer{
+	Addr:     inprocessAddr{},
+	AuthInfo: inprocessAddr{},
+}
 
-	var strs []string
-	if method[0] == '/' {
-		strs = strings.SplitN(method[1:], "/", 2)
-	} else {
-		strs = strings.SplitN(method, "/", 2)
+type inprocessAddr struct{}
+
+func (inprocessAddr) Network() string {
+	return "inproc"
+}
+
+func (inprocessAddr) String() string {
+	return "0"
+}
+
+func (inprocessAddr) AuthType() string {
+	return "inproc"
+}
+
+func (c *Channel) Invoke(ctx context.Context, method string, req, resp interface{}, opts ...grpc.CallOption) error {
+	copts := internal.GetCallOptions(opts)
+	copts.SetPeer(&inprocessPeer)
+
+	if method[0] != '/' {
+		method = "/" + method
 	}
+	ctx, err := internal.ApplyPerRPCCreds(ctx, copts, fmt.Sprintf("inproc:0%s", method), true)
+	if err != nil {
+		return err
+	}
+
+	strs := strings.SplitN(method[1:], "/", 2)
 	serviceName := strs[0]
 	methodName := strs[1]
 	sd, handler := c.handlers.QueryService(serviceName)
@@ -179,33 +203,67 @@ func (c *Channel) Invoke(ctx context.Context, method string, req, resp interface
 		return internal.CopyMessage(req, out)
 	}
 	ctx, cancel := context.WithCancel(ctx)
+	sts := internal.UnaryServerTransportStream{Name: method}
+
 	defer cancel()
 	ch := make(chan frame, 1)
 	go func() {
-		v, err := md.Handler(handler, makeServerContext(ctx), codec, c.unaryInterceptor)
-		ch <- frame{data: v, err: err}
+		defer func() {
+			sts.Finish()
+			close(ch)
+		}()
+		ctx := grpc.NewContextWithServerTransportStream(makeServerContext(ctx), &sts)
+		v, err := md.Handler(handler, ctx, codec, c.unaryInterceptor)
+		if h := sts.GetHeaders(); len(h) > 0 {
+			ch <- frame{headers: h}
+		}
+		if err == nil {
+			ch <- frame{data: v}
+		}
+		if t := sts.GetTrailers(); len(t) > 0 {
+			ch <- frame{trailers: t}
+		}
+		if err != nil {
+			ch <- frame{err: err}
+		}
 	}()
 
-	select {
-	case r := <-ch:
-		if r.err != nil {
-			return r.err
+	for {
+		select {
+		case r := <-ch:
+			switch {
+			case r.err != nil:
+				return r.err
+			case r.data != nil:
+				if err := internal.CopyMessage(r.data, resp); err != nil {
+					return err
+				}
+			case r.headers != nil:
+				copts.SetHeaders(r.headers)
+			case r.trailers != nil:
+				copts.SetTrailers(r.trailers)
+			default:
+				return nil
+			}
+		case <-ctx.Done():
+			return internal.TranslateContextError(ctx.Err())
 		}
-		return internal.CopyMessage(r.data, resp)
-	case <-ctx.Done():
-		return internal.TranslateContextError(ctx.Err())
 	}
 }
 
 func (c *Channel) NewStream(ctx context.Context, desc *grpc.StreamDesc, method string, opts ...grpc.CallOption) (grpc.ClientStream, error) {
-	// TODO(jh): support call options.. somehow?
+	copts := internal.GetCallOptions(opts)
+	copts.SetPeer(&inprocessPeer)
 
-	var strs []string
-	if method[0] == '/' {
-		strs = strings.SplitN(method[1:], "/", 2)
-	} else {
-		strs = strings.SplitN(method, "/", 2)
+	if method[0] != '/' {
+		method = "/" + method
 	}
+	ctx, err := internal.ApplyPerRPCCreds(ctx, copts, fmt.Sprintf("inproc:0%s", method), true)
+	if err != nil {
+		return nil, err
+	}
+
+	strs := strings.SplitN(method[1:], "/", 2)
 	// The given StreamDesc is a client-created object, which means the Handler
 	// field is not populated. So we have to look up from the channel config the
 	// corresponding StreamDesc that includes a handler.
@@ -231,10 +289,11 @@ func (c *Channel) NewStream(ctx context.Context, desc *grpc.StreamDesc, method s
 		defer svrCancel()
 
 		serverStream := &inProcessServerStream{
-			ctx:       svrCtx,
 			requests:  requests,
 			responses: responses,
 		}
+		sts := &internal.ServerTransportStream{Name: method, Stream: serverStream}
+		serverStream.ctx = grpc.NewContextWithServerTransportStream(svrCtx, sts)
 		var err error
 		defer func() {
 			serverStream.finish(err)
@@ -257,6 +316,7 @@ func (c *Channel) NewStream(ctx context.Context, desc *grpc.StreamDesc, method s
 		requests:       requests,
 		responses:      responses,
 		responseStream: desc.ServerStreams,
+		copts:          copts,
 	}
 	runtime.SetFinalizer(cs, func(stream *inProcessClientStream) {
 		cancel()
@@ -295,7 +355,8 @@ func makeServerContext(ctx context.Context) context.Context {
 	if meta, ok := metadata.FromOutgoingContext(ctx); ok {
 		newCtx = metadata.NewIncomingContext(newCtx, meta)
 	}
-	// TODO(jh): anything else to put into new context (socket info, TLS peer, etc)?
+	newCtx = peer.NewContext(newCtx, &inprocessPeer)
+
 	return newCtx
 }
 
@@ -381,6 +442,10 @@ func (s *inProcessServerStream) finish(err error) {
 		s.mu.Unlock()
 	}()
 
+	if s.state == streamStateHeaders && len(s.headers) > 0 {
+		writeMessage(s.ctx, nil, s.responses, frame{headers: s.headers})
+	}
+
 	if len(s.trailers) > 0 {
 		writeMessage(s.ctx, nil, s.responses, frame{trailers: s.trailers})
 	}
@@ -392,11 +457,14 @@ func (s *inProcessServerStream) finish(err error) {
 }
 
 func (s *inProcessServerStream) SetTrailer(md metadata.MD) {
+	s.TrySetTrailer(md) // must ignore return value
+}
+
+func (s *inProcessServerStream) TrySetTrailer(md metadata.MD) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.state == streamStateClosed {
-		// nothing to do; method does not allow returning an error
-		return
+		return fmt.Errorf("trailers already sent")
 	}
 	if s.trailers == nil {
 		s.trailers = metadata.MD{}
@@ -404,6 +472,7 @@ func (s *inProcessServerStream) SetTrailer(md metadata.MD) {
 	for k, v := range md {
 		s.trailers[k] = append(s.trailers[k], v...)
 	}
+	return nil
 }
 
 func (s *inProcessServerStream) Context() context.Context {
@@ -441,6 +510,7 @@ func (s *inProcessServerStream) RecvMsg(m interface{}) error {
 type inProcessClientStream struct {
 	ctx            context.Context
 	svrCtx         context.Context
+	copts          *internal.CallOptions
 	responseStream bool
 
 	respMu    sync.Mutex
@@ -471,8 +541,10 @@ func (s *inProcessClientStream) Header() (metadata.MD, error) {
 			switch m.kind() {
 			case kindHeaders:
 				s.headers = m.headers
+				s.copts.SetHeaders(s.headers)
 			case kindTrailers:
 				s.trailers = m.trailers
+				s.copts.SetTrailers(s.trailers)
 			case kindError:
 				s.state = streamStateClosed
 				fallthrough
@@ -556,8 +628,10 @@ func (s *inProcessClientStream) recvMsgLocked(m interface{}, lastMessage bool) e
 		case kindHeaders:
 			s.state = streamStateMessages
 			s.headers = r.headers
+			s.copts.SetHeaders(s.headers)
 		case kindTrailers:
 			s.trailers = r.trailers
+			s.copts.SetTrailers(s.trailers)
 		case kindError:
 			s.state = streamStateClosed
 			s.last = &r

@@ -70,13 +70,29 @@
 // Note that when a unary interceptor is invoked for an RPC on a channel that
 // is *not* a *grpc.ClientConn, the parameter of that type will be nil.
 //
+// Not all client call options will make sense for all transports. This repo
+// chooses to ignore call options that do not apply (as opposed to failing
+// the RPC or panic'ing). However, several call options are likely important
+// to support: those for accessing header and trailer metadata. The peer,
+// per-RPC credentials, and message size limits are other options that are
+// reasonably straight-forward to apply to other transports. But the other
+// options (dealing with on-the-wire encoding, compression, etc) are less
+// likely to be meaningful.
+//
 // Server-Side Service Registries
 //
 // The server-side implementation of a transport must be able to invoke
 // method and stream handlers for a given service implementation. This is done
-// by implementing the ServiceRegistry interface. When a service is implemented
+// by implementing the ServiceRegistry interface. When a service is registered,
 // a service description is provided that includes access to method and stream
 // handlers. When the transport receives requests for RPC operations, it in
 // turn invokes these handlers. For streaming operations, it must also supply
 // a grpc.ServerStream implementation, for exchanging messages on the stream.
+//
+// Note that the server stream's context will need a custom implementation of
+// the grpc.ServerTransportStream in it, too. Sadly, this interface is just
+// different enough from grpc.ServerStream that they cannot be implemented by
+// the same type. This is particularly necessary for unary calls since this is
+// how a unary handler dictates what headers and trailers to send back to the
+// client.
 package grpchan

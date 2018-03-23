@@ -10,41 +10,26 @@
 //
 // Caveats
 //
-// There are some limitations when using this package:
+// There are couple of limitations when using this package:
 //   1. True bidi streams are not supported. The best that can be done are half-duplex
 //      bidi streams, where the client uploads its entire streaming request and then the
 //      server can reply with a streaming response. Interleaved reading and writing does
 //      not work with HTTP 1.1. (Even if there were clients that supported it, the Go HTTP
 //      server APIS do not -- once a server handler starts writing to the response body,
 //      the request body is closed and no more messages can be read from it).
-//   2. Server handlers for unary RPCs cannot send custom metadata in the form of response
-//      headers or trailers. This is due to limitations in the actual GRPC APIs.
-//   3. Client-side interceptors that interact with the *grpc.ClientConn, such as examining
+//   2. Client-side interceptors that interact with the *grpc.ClientConn, such as examining
 //      connection states or querying static method configs, will not work. No GRPC
 //      client connection is actually established and HTTP 1.1 calls will supply a nil
 //      *grpc.ClientConn to any interceptor.
-//   4. Client-side call options are not supported. Any call options provided are ignored.
-//      This means that clients cannot extract headers and trailers returned from the server
-//      during a unary RPC, due to API limitations in GRPC. (Which is fine since servers
-//      can't return them anyway due to other API limitations; see bullet #2 above.)
 //
-// Note that for environments like Google App Engine, which does not support streaming,
-// use of streaming RPCs may result in high latency and high memory usage as entire streams
-// must be buffered in memory. Use streams judiciously when inter-operating with App Engine.
+// Note that for environments like Google App Engine, which do not support streaming, use
+// of streaming RPCs may result in high latency and high memory usage as entire streams must
+// be buffered in memory. Use streams judiciously when inter-operating with App Engine.
 //
 // This package does not attempt to block use of full-duplex streaming. So if HTTP 1.1 is
-// used to invoke a bidi streaming method, there are several things that could go
-// awry:
-//  1. The server handler could see inexplicable errors when trying to receive a message
-//     after any message or headers have already been sent to the client. This is the
-//     least dangerous possibility.
-//  2. Due to possible back-pressure on the network channel, the RPC could deadlock. This
-//     could occur if the client is trying to write a large request stream at the same time
-//     as the server is trying to write a large response stream. If neither side accepts and
-//     processes incoming data, both writes could stall, effectively deadlocking the RPC.
-//     (For this reason, it is advised to always set deadlines on RPC contexts. The deadline
-//     will be respected on the client in this package and is also propagated to servers via
-//     metadata, and respected there as well.)
+// used to invoke a bidi streaming method, the RPC will almost certainly fail because the
+// server's sending of headers and the first response message will immediately close the
+// request side for reading. So later attempts to read a request message will fail.
 //
 // Anatomy of GRPC-over-HTTP
 //
@@ -62,7 +47,10 @@
 // more than one error detail is associated with the status, there will be more than one
 // header, and they will be added to the response in the same order as they appear in the
 // server-side status. The value for the details header is a base64-encoding
-// google.protobuf.Any message, which contains the error detail message.
+// google.protobuf.Any message, which contains the error detail message. If the handler
+// sends trailers, not just headers, they are encoded as HTTP 1.1 headers, but their names
+// are prefixed with "X-GRPC-Trailer-". This allows clients to recover headers and trailers
+// independently, as the server handler intended them.
 //
 // Streaming RPCs are a bit more complex. Since the payloads can include multiple messages,
 // the content type is not "application/x-protobuf". It is instead "application/x-grpc-proto".
