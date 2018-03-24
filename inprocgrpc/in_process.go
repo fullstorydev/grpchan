@@ -325,32 +325,11 @@ func (c *Channel) NewStream(ctx context.Context, desc *grpc.StreamDesc, method s
 }
 
 func makeServerContext(ctx context.Context) context.Context {
-	// NB(jh): Not ideal to have to spin up a goroutine, but we
-	// need client->server propagation of cancellations. And we
-	// can't make the server context a child of the client context
-	// because that inadvertently leaks state, potentially
-	// contaminating it (so that server context queries will be
-	// inappropriately answered with client context values).
-	// It would be nice if context package provided a way to
-	// clear all context values, so you could create a child
-	// context that is only a child in terms of cancellation,
-	// not in terms of values.
-	newCtx := context.Background()
-	var cancel context.CancelFunc
-	if dl, ok := ctx.Deadline(); ok {
-		// This deadline isn't strictly necessary for having newCtx cancelled
-		// after the deadline since we explicitly propagate cancellation below.
-		// This is more for server-side code that wants to query the context to
-		// know what is the current deadline.
-		newCtx, cancel = context.WithDeadline(newCtx, dl)
-	} else {
-		newCtx, cancel = context.WithCancel(newCtx)
-	}
-
-	go func() {
-		<-ctx.Done()
-		cancel()
-	}()
+	// We don't want the server have any of the values in the client's context
+	// since that can inadvertently leak state from the client to the server.
+	// But we do want a child context, just so that request deadlines and client
+	// cancellations work seamlessly.
+	newCtx := context.Context(noValuesContext{ctx})
 
 	if meta, ok := metadata.FromOutgoingContext(ctx); ok {
 		newCtx = metadata.NewIncomingContext(newCtx, meta)
@@ -358,6 +337,17 @@ func makeServerContext(ctx context.Context) context.Context {
 	newCtx = peer.NewContext(newCtx, &inprocessPeer)
 
 	return newCtx
+}
+
+// noValuesContext wraps a context but prevents access to its values. This is
+// useful when you need a child context only to propagate cancellations and
+// deadlines, but explicitly *not* to propagate values.
+type noValuesContext struct {
+	context.Context
+}
+
+func (ctx noValuesContext) Value(key interface{}) interface{} {
+	return nil
 }
 
 type streamState int
