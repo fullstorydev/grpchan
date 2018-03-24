@@ -208,11 +208,11 @@ func peerFromRequest(r *http.Request) *peer.Peer {
 func drainAndClose(r io.ReadCloser) error {
 	_, copyErr := io.Copy(ioutil.Discard, r)
 	closeErr := r.Close()
-	if closeErr != nil {
-		return closeErr
-	} else {
+	// error from io.Copy likely more useful than the one from Close
+	if copyErr != nil {
 		return copyErr
 	}
+	return closeErr
 }
 
 func writeError(w http.ResponseWriter, code int) {

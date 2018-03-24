@@ -24,10 +24,9 @@ package httpgrpc
 //    channel implementation and use it outside of testing. At this time, you can safely
 //    change channelNext to be named Channel and then remove the old code for Version-Now.
 
+// These are the content-types used for "version 1" (hopefully the only version ever?)
+// of the gRPC-over-HTTP transport
 const (
-	// These are the content-types used for "version 1" (hopefully the only version ever?)
-	// of the GRPC-over-HTTP transport
-
 	UnaryRpcContentType_V1  = "application/x-protobuf"
 	StreamRpcContentType_V1 = "application/x-httpgrpc-proto+v1"
 )

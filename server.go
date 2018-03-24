@@ -33,7 +33,7 @@ type service struct {
 	handler interface{}
 }
 
-// RegisterHandler registers the given handler to be used for the given service.
+// RegisterService registers the given handler to be used for the given service.
 // Only a single handler can be registered for a given service. And services are
 // identified by their fully-qualified name (e.g. "package.name.Service").
 func (r HandlerMap) RegisterService(desc *grpc.ServiceDesc, h interface{}) {
