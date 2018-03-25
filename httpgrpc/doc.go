@@ -53,7 +53,7 @@
 // independently, as the server handler intended them.
 //
 // Streaming RPCs are a bit more complex. Since the payloads can include multiple messages,
-// the content type is not "application/x-protobuf". It is instead "application/x-grpc-proto".
+// the content type is not "application/x-protobuf". It is instead "application/x-httpgrpc-proto+v1".
 // The actual request and response bodies consist of a sequence of length-delimited proto
 // messages, each of which is binary encoded. The length delimiter is a 32-bit prefix that
 // indicates the size of the subsequent message. Response sequences have a special final

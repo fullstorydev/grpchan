@@ -173,6 +173,8 @@ func (inprocessAddr) AuthType() string {
 	return "inproc"
 }
 
+// Invoke satisfies the grpchan.Channel interface and supports sending unary
+// RPCs via the in-process channel.
 func (c *Channel) Invoke(ctx context.Context, method string, req, resp interface{}, opts ...grpc.CallOption) error {
 	copts := internal.GetCallOptions(opts)
 	copts.SetPeer(&inprocessPeer)
@@ -251,6 +253,8 @@ func (c *Channel) Invoke(ctx context.Context, method string, req, resp interface
 	}
 }
 
+// NewStream satisfies the grpchan.Channel interface and supports sending
+// streaming RPCs via the in-process channel.
 func (c *Channel) NewStream(ctx context.Context, desc *grpc.StreamDesc, method string, opts ...grpc.CallOption) (grpc.ClientStream, error) {
 	copts := internal.GetCallOptions(opts)
 	copts.SetPeer(&inprocessPeer)
@@ -379,9 +383,8 @@ const (
 // communicate request and response messages from/to the client (which runs in a
 // separate goroutine).
 type inProcessServerStream struct {
-	ctx            context.Context
-	requests       <-chan frame
-	responseStream bool
+	ctx      context.Context
+	requests <-chan frame
 
 	mu        sync.Mutex
 	headers   metadata.MD
@@ -411,17 +414,20 @@ func (s *inProcessServerStream) setHeader(md metadata.MD, send bool) error {
 		s.headers[k] = append(s.headers[k], v...)
 	}
 	if send {
-		s.sendHeadersLocked()
+		return s.sendHeadersLocked()
 	}
 	return nil
 }
 
-func (s *inProcessServerStream) sendHeadersLocked() {
+func (s *inProcessServerStream) sendHeadersLocked() error {
 	if len(s.headers) > 0 {
-		writeMessage(s.ctx, nil, s.responses, frame{headers: s.headers})
+		if err := writeMessage(s.ctx, nil, s.responses, frame{headers: s.headers}); err != nil {
+			return err
+		}
 	}
 	s.headers = nil
 	s.state = streamStateMessages
+	return nil
 }
 
 func (s *inProcessServerStream) finish(err error) {
@@ -476,7 +482,9 @@ func (s *inProcessServerStream) SendMsg(m interface{}) error {
 		return io.EOF
 	}
 	if s.state == streamStateHeaders {
-		s.sendHeadersLocked()
+		if err := s.sendHeadersLocked(); err != nil {
+			return err
+		}
 	}
 	m = internal.CloneMessage(m)
 	return writeMessage(s.ctx, nil, s.responses, frame{data: m})

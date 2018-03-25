@@ -46,9 +46,8 @@ var _ grpchan.Channel = (*Channel)(nil)
 
 var grpcDetailsHeader = textproto.CanonicalMIMEHeaderKey("X-GRPC-Details")
 
-// Invoke executes a unary RPC, sending the given req message and populating the
-// given resp with the server's reply. Client stubs that use HTTP 1.1 should use
-// this method instead of grpc.Invoke.
+// Invoke satisfies the grpchan.Channel interface and supports sending unary
+// RPCs via the in-process channel.
 func (ch *Channel) Invoke(ctx context.Context, methodName string, req, resp interface{}, opts ...grpc.CallOption) error {
 	copts := internal.GetCallOptions(opts)
 
@@ -113,8 +112,8 @@ func (ch *Channel) Invoke(ctx context.Context, methodName string, req, resp inte
 	return proto.Unmarshal(b, resp.(proto.Message))
 }
 
-// NewStream executes a streaming RPC. Client stubs that use HTTP 1.1 should
-// use this method instead of grpc.NewClientStream.
+// NewStream satisfies the grpchan.Channel interface and supports sending
+// streaming RPCs via the in-process channel.
 func (ch *Channel) NewStream(ctx context.Context, desc *grpc.StreamDesc, methodName string, opts ...grpc.CallOption) (grpc.ClientStream, error) {
 	copts := internal.GetCallOptions(opts)
 

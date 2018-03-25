@@ -31,18 +31,24 @@ type CallOptions struct {
 	MaxSend int
 }
 
+// SetHeaders sets all accumulated header addresses to the given metadata. This
+// satisfies grpc.Header call options.
 func (co *CallOptions) SetHeaders(md metadata.MD) {
 	for _, hdr := range co.Headers {
 		*hdr = md
 	}
 }
 
+// SetTrailers sets all accumulated trailer addresses to the given metadata.
+// This satisfies grpc.Trailer call options.
 func (co *CallOptions) SetTrailers(md metadata.MD) {
 	for _, tlr := range co.Trailers {
 		*tlr = md
 	}
 }
 
+// SetPeer sets all accumulated peer addresses to the given peer. This satisfies
+// grpc.Peer call options.
 func (co *CallOptions) SetPeer(p *peer.Peer) {
 	for _, pr := range co.Peer {
 		*pr = *p
