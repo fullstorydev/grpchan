@@ -193,6 +193,13 @@ func HandleStream(svr interface{}, serviceName string, desc *grpc.StreamDesc, st
 			tr.Message = "Internal Server Error"
 		}
 
+		// must put something the trailing message so it's size is non-zero
+		// (otherwise, it's envelope cannot indicate a negative number, and
+		// it will be confused for a normal response message)
+		if tr.Message == "" {
+			tr.Message = codes.Code(tr.Code).String()
+		}
+
 		writeProtoMessage(w, &tr, true)
 	}
 }
