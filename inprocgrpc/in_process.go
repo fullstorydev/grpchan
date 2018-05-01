@@ -288,13 +288,23 @@ func (c *Channel) NewStream(ctx context.Context, desc *grpc.StreamDesc, method s
 	// backpressure comes from tiny buffer, in lieu of HTTP/2 flow control
 	requests := make(chan frame, 1)
 	responses := make(chan frame, 1)
+
+	// the server context which is cancelled when the server goroutine below exits
 	svrCtx, svrCancel := context.WithCancel(makeServerContext(ctx))
+
+	// a child context which is cancelled when the RPC completes, but before
+	// the server handler has sent its final messages (trailers and errors)
+	// (this is needed to prevent deadlock between server trying to send final
+	// messages while client is trying to concurrently write a request)
+	svrDoneCtx, svrDoneCancel := context.WithCancel(svrCtx)
+
 	go func() {
 		defer svrCancel()
 
 		serverStream := &inProcessServerStream{
 			requests:  requests,
 			responses: responses,
+			onDone:    svrDoneCancel,
 		}
 		sts := &internal.ServerTransportStream{Name: method, Stream: serverStream}
 		serverStream.ctx = grpc.NewContextWithServerTransportStream(svrCtx, sts)
@@ -316,7 +326,7 @@ func (c *Channel) NewStream(ctx context.Context, desc *grpc.StreamDesc, method s
 	}()
 	cs := &inProcessClientStream{
 		ctx:            ctx,
-		svrCtx:         svrCtx,
+		svrCtx:         svrDoneCtx,
 		requests:       requests,
 		responses:      responses,
 		responseStream: desc.ServerStreams,
@@ -384,6 +394,7 @@ const (
 // separate goroutine).
 type inProcessServerStream struct {
 	ctx      context.Context
+	onDone   context.CancelFunc
 	requests <-chan frame
 
 	mu        sync.Mutex
@@ -431,6 +442,8 @@ func (s *inProcessServerStream) sendHeadersLocked() error {
 }
 
 func (s *inProcessServerStream) finish(err error) {
+	s.onDone()
+
 	s.mu.Lock()
 	defer func() {
 		s.state = streamStateClosed
