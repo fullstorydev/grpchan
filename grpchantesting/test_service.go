@@ -17,6 +17,7 @@ import (
 // TestServer has default responses to the various kinds of methods.
 type TestServer struct{}
 
+// Unary implements the TestService server interface.
 func (s *TestServer) Unary(ctx context.Context, req *Message) (*Message, error) {
 	if req.DelayMillis > 0 {
 		time.Sleep(time.Millisecond * time.Duration(req.DelayMillis))
@@ -42,6 +43,7 @@ func statusFromRequest(req *Message) error {
 	return status.FromProto(&statProto).Err()
 }
 
+// ClientStream implements the TestService server interface.
 func (s *TestServer) ClientStream(cs TestService_ClientStreamServer) error {
 	var req *Message
 	count := int32(0)
@@ -79,6 +81,7 @@ func (s *TestServer) ClientStream(cs TestService_ClientStreamServer) error {
 	})
 }
 
+// ServerStream implements the TestService server interface.
 func (s *TestServer) ServerStream(req *Message, ss TestService_ServerStreamServer) error {
 	if req.DelayMillis > 0 {
 		time.Sleep(time.Millisecond * time.Duration(req.DelayMillis))
@@ -103,6 +106,7 @@ func (s *TestServer) ServerStream(req *Message, ss TestService_ServerStreamServe
 	return nil
 }
 
+// BidiStream implements the TestService server interface.
 func (s *TestServer) BidiStream(str TestService_BidiStreamServer) error {
 	md, _ := metadata.FromIncomingContext(str.Context())
 	var req *Message
@@ -158,6 +162,7 @@ func (s *TestServer) BidiStream(str TestService_BidiStreamServer) error {
 	return nil
 }
 
+// UseExternalMessageTwice implements the TestService server interface.
 func (s *TestServer) UseExternalMessageTwice(ctx context.Context, in *empty.Empty) (*empty.Empty, error) {
 	return &empty.Empty{}, nil
 }
