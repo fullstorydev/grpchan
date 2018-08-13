@@ -208,7 +208,7 @@ func (c *Channel) Invoke(ctx context.Context, method string, req, resp interface
 	sts := internal.UnaryServerTransportStream{Name: method}
 
 	defer cancel()
-	ch := make(chan frame, 1)
+	ch := make(chan frame, 4)
 	go func() {
 		defer func() {
 			sts.Finish()
