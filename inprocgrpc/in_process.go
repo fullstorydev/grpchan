@@ -217,26 +217,34 @@ func (c *Channel) Invoke(ctx context.Context, method string, req, resp interface
 		ctx := grpc.NewContextWithServerTransportStream(makeServerContext(ctx), &sts)
 		v, err := md.Handler(handler, ctx, codec, c.unaryInterceptor)
 		if h := sts.GetHeaders(); len(h) > 0 {
-			ch <- frame{headers: h}
+			writeMessage(ctx, nil, ch, frame{headers: h})
 		}
 		if err == nil {
-			ch <- frame{data: v}
+			writeMessage(ctx, nil, ch, frame{data: v})
 		}
 		if t := sts.GetTrailers(); len(t) > 0 {
-			ch <- frame{trailers: t}
+			writeMessage(ctx, nil, ch, frame{trailers: t})
 		}
 		if err != nil {
-			ch <- frame{err: err}
+			writeMessage(ctx, nil, ch, frame{err: err})
 		}
 	}()
 
+	gotResponse := false
 	for {
 		select {
-		case r := <-ch:
+		case r, ok := <-ch:
+			if !ok && !gotResponse {
+				return io.EOF
+			}
 			switch {
 			case r.err != nil:
 				return r.err
 			case r.data != nil:
+				if gotResponse {
+					return status.Error(codes.Internal, "server sent unexpected response message")
+				}
+				gotResponse = true
 				if err := internal.CopyMessage(r.data, resp); err != nil {
 					return err
 				}
