@@ -354,12 +354,16 @@ func (s *testServer) UseExternalMessageTwice(ctx context.Context, req *empty.Emp
 
 func (s *testServer) unary(ctx context.Context, methodName string, req, resp interface{}) error {
 	headers, _ := metadata.FromIncomingContext(ctx)
-	s.calls = append(s.calls, &unaryCall{methodName: methodName, headers: headers, req: internal.CloneMessage(req)})
+	reqClone, err := internal.CloneMessage(req)
+	if err != nil {
+		return err
+	}
+	s.calls = append(s.calls, &unaryCall{methodName: methodName, headers: headers, req: reqClone})
 	if s.code != codes.OK {
 		return status.Error(s.code, s.code.String())
 	}
 	if s.resp != nil {
-		return internal.CopyMessage(s.resp, resp)
+		return internal.CopyMessage(resp, s.resp)
 	}
 	return internal.ClearMessage(resp)
 }
@@ -458,7 +462,11 @@ func (s *testServerStream) SendMsg(m interface{}) error {
 	if err := s.ctx.Err(); err != nil {
 		return internal.TranslateContextError(err)
 	}
-	s.resps = append(s.resps, internal.CloneMessage(m))
+	mClone, err := internal.CloneMessage(m)
+	if err != nil {
+		return err
+	}
+	s.resps = append(s.resps, mClone)
 	return nil
 }
 
@@ -469,7 +477,7 @@ func (s *testServerStream) RecvMsg(m interface{}) error {
 	req := s.reqs[0]
 	s.reqs = s.reqs[1:]
 	if req != nil {
-		return internal.CopyMessage(req, m)
+		return internal.CopyMessage(m, req)
 	}
 	return internal.ClearMessage(m)
 }

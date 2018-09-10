@@ -14,47 +14,35 @@ import (
 // CopyMessage copies data from the given in value to the given out value. It returns an
 // error if the two values do not have the same type or if the given out value is not
 // settable.
-func CopyMessage(in, out interface{}) error {
-	if pmIn, ok := in.(proto.Message); ok {
-		if pmOut, ok := out.(proto.Message); ok {
-			if reflect.TypeOf(in) != reflect.TypeOf(out) {
-				return fmt.Errorf("incompatible types: %v != %v", reflect.TypeOf(in), reflect.TypeOf(out))
-			}
-			// this does a proper deep copy
-			pmOut.Reset()
-			proto.Merge(pmOut, pmIn)
-			return nil
-		}
+func CopyMessage(out, in interface{}) error {
+	pmIn, ok := in.(proto.Message)
+	if !ok {
+		return fmt.Errorf("value to copy is not a proto.Message: %T; use a custom cloner", in)
+	}
+	if reflect.TypeOf(in) != reflect.TypeOf(out) {
+		return fmt.Errorf("incompatible types: %v != %v", reflect.TypeOf(in), reflect.TypeOf(out))
+	}
+	rvOut := reflect.ValueOf(out)
+	if rvOut.Kind() == reflect.Ptr && rvOut.IsNil() {
+		return fmt.Errorf("copy destination cannot be nil")
 	}
 
-	// best-effort shallow copy; under typical circumstances this
-	// code path should never be exercised
-	src := reflect.Indirect(reflect.ValueOf(in))
-	dest := reflect.Indirect(reflect.ValueOf(out))
-	if src.Type() != dest.Type() {
-		return fmt.Errorf("incompatible types: %v != %v", src.Type(), dest.Type())
-	}
-	if !dest.CanSet() {
-		return fmt.Errorf("unable to set destination: %v", reflect.ValueOf(out).Type())
-	}
-	dest.Set(src)
+	// this does a proper deep copy
+	pmOut := out.(proto.Message)
+	pmOut.Reset()
+	proto.Merge(pmOut, pmIn)
 	return nil
 }
 
 // CloneMessage returns a copy of the given value.
-func CloneMessage(m interface{}) interface{} {
-	if pm, ok := m.(proto.Message); ok {
-		// this does a proper deep copy
-		return proto.Clone(pm)
+func CloneMessage(m interface{}) (interface{}, error) {
+	pm, ok := m.(proto.Message)
+	if !ok {
+		return nil, fmt.Errorf("value to clone is not a proto.Message: %T; use a custom cloner", m)
 	}
 
-	// best-effort shallow copy; under typical circumstances this
-	// code path should never be exercised
-	mCopy := reflect.New(reflect.TypeOf(m).Elem()).Interface()
-	if err := CopyMessage(m, mCopy); err != nil {
-		panic(err)
-	}
-	return mCopy
+	// this does a proper deep copy
+	return proto.Clone(pm), nil
 }
 
 // ClearMessage resets the given value to its zero-value state. It returns an error
