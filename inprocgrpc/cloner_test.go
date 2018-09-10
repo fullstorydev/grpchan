@@ -5,12 +5,18 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/golang/protobuf/jsonpb"
 	"github.com/golang/protobuf/proto"
 
 	"github.com/fullstorydev/grpchan/httpgrpc"
 )
 
-var source proto.Message
+var (
+	source   *httpgrpc.HttpTrailer
+	sourceJs string // snapshot of source as JSON
+
+	jsm = &jsonpb.Marshaler{}
+)
 
 func init() {
 	source = &httpgrpc.HttpTrailer{
@@ -22,10 +28,15 @@ func init() {
 			"ghi": {Values: []string{"xyz", "123"}},
 		},
 	}
+	var err error
+	sourceJs, err = jsm.MarshalToString(source)
+	if err != nil {
+		panic(err)
+	}
 }
 
-func TestDefaultCloner(t *testing.T) {
-	testCloner(t, DefaultCloner{})
+func TestProtoCloner(t *testing.T) {
+	testCloner(t, ProtoCloner{})
 }
 
 type protoCodec struct{}
@@ -47,13 +58,13 @@ func TestCodecCloner(t *testing.T) {
 }
 
 func TestCloneFunc(t *testing.T) {
-	testCloner(t, CloneFunc(func(in interface{}) interface{} {
-		return proto.Clone(in.(proto.Message))
+	testCloner(t, CloneFunc(func(in interface{}) (interface{}, error) {
+		return proto.Clone(in.(proto.Message)), nil
 	}))
 }
 
 func TestCopyFunc(t *testing.T) {
-	testCloner(t, CopyFunc(func(in, out interface{}) error {
+	testCloner(t, CopyFunc(func(out, in interface{}) error {
 		if reflect.TypeOf(in) != reflect.TypeOf(out) {
 			return fmt.Errorf("type mismatch: %T != %T", in, out)
 		}
@@ -70,16 +81,37 @@ func TestCopyFunc(t *testing.T) {
 
 func testCloner(t *testing.T, cloner Cloner) {
 	dest := &httpgrpc.HttpTrailer{}
-	err := cloner.Copy(source, dest)
+	err := cloner.Copy(dest, source)
 	if err != nil {
 		t.Fatalf("Copy returned unexpected error: %v", err)
 	}
 	if !proto.Equal(source, dest) {
 		t.Fatalf("Copy failed to produce a value equal to input")
 	}
+	checkIndependence(t, dest)
 
-	clone := cloner.Clone(source)
+	clone, err := cloner.Clone(source)
+	if err != nil {
+		t.Fatalf("Clone returned unexpected error: %v", err)
+	}
 	if !proto.Equal(source, clone.(proto.Message)) {
 		t.Fatalf("Clone failed to produce a value equal to input")
+	}
+	checkIndependence(t, clone.(*httpgrpc.HttpTrailer))
+}
+
+func checkIndependence(t *testing.T, dest *httpgrpc.HttpTrailer) {
+	// mutate copy and make sure we don't see it in original
+	// (e.g. verifies the copy is a deep copy)
+	dest.Message += "baz"
+	dest.Metadata["ghi"].Values = append(dest.Metadata["ghi"].Values, "456")
+	dest.Metadata["jkl"] = &httpgrpc.TrailerValues{Values: []string{"zomg!"}}
+
+	sourceJs2, err := jsm.MarshalToString(source)
+	if err != nil {
+		t.Fatalf("Failed to marsal message to JSON: %v", err)
+	}
+	if sourceJs2 != sourceJs {
+		t.Errorf("source changed after mutating dest!\nExpecting:\n%s\nGot:\n%s\n", sourceJs, sourceJs2)
 	}
 }

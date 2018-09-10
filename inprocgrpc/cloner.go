@@ -18,22 +18,23 @@ import (
 // that is a valid strategy that a custom Cloner implementation could take).
 // Copies are made to avoid sharing values across client and server goroutines.
 type Cloner interface {
-	Copy(in, out interface{}) error
-	Clone(interface{}) interface{}
+	Copy(out, in interface{}) error
+	Clone(interface{}) (interface{}, error)
 }
 
-// DefaultCloner is the default cloner used by an in-process channel. This
-// implementation can correctly handle protobuf messages. But it will try to
-// handle non-protobuf messages by doing a shallow copy via reflection.
-type DefaultCloner struct{}
+// ProtoCloner is the default cloner used by an in-process channel. This
+// implementation can correctly handle protobuf messages. Copy and clone
+// operations will fail if the input message is not a protobuf message (in
+// which case a custom cloner must be used).
+type ProtoCloner struct{}
 
-var _ Cloner = DefaultCloner{}
+var _ Cloner = ProtoCloner{}
 
-func (DefaultCloner) Copy(in, out interface{}) error {
-	return internal.CopyMessage(in, out)
+func (ProtoCloner) Copy(out, in interface{}) error {
+	return internal.CopyMessage(out, in)
 }
 
-func (DefaultCloner) Clone(in interface{}) interface{} {
+func (ProtoCloner) Clone(in interface{}) (interface{}, error) {
 	return internal.CloneMessage(in)
 }
 
@@ -41,9 +42,12 @@ func (DefaultCloner) Clone(in interface{}) interface{} {
 // function implements the Clone method. To implement the Copy method, the given
 // function is invoked and then reflection is used to shallow copy the clone to
 // the output.
-func CloneFunc(fn func(interface{}) interface{}) Cloner {
-	copyFn := func(in, out interface{}) error {
-		in = fn(in) // deep copy input
+func CloneFunc(fn func(interface{}) (interface{}, error)) Cloner {
+	copyFn := func(out, in interface{}) error {
+		in, err := fn(in) // deep copy input
+		if err != nil {
+			return err
+		}
 
 		// then shallow-copy into out via reflection
 		src := reflect.Indirect(reflect.ValueOf(in))
@@ -65,13 +69,13 @@ func CloneFunc(fn func(interface{}) interface{}) Cloner {
 // function implements the Copy method. To implement the Clone method, a new
 // value of the same type is created using reflection and then the given
 // function is used to copy the input to the newly created value.
-func CopyFunc(fn func(in, out interface{}) error) Cloner {
-	cloneFn := func(in interface{}) interface{} {
+func CopyFunc(fn func(out, in interface{}) error) Cloner {
+	cloneFn := func(in interface{}) (interface{}, error) {
 		clone := reflect.New(reflect.TypeOf(in).Elem()).Interface()
-		if err := fn(in, clone); err != nil {
-			panic(err)
+		if err := fn(clone, in); err != nil {
+			return nil, err
 		}
-		return clone
+		return clone, nil
 	}
 	return &funcCloner{clone: cloneFn, copy: fn}
 }
@@ -82,7 +86,7 @@ func CopyFunc(fn func(in, out interface{}) error) Cloner {
 // reflection to create a new value of the same type and uses this strategy to
 // then copy the input to the newly created value.
 func CodecCloner(codec encoding.Codec) Cloner {
-	return CopyFunc(func(in, out interface{}) error {
+	return CopyFunc(func(out, in interface{}) error {
 		if b, err := codec.Marshal(in); err != nil {
 			return err
 		} else if err := codec.Unmarshal(b, out); err != nil {
@@ -93,16 +97,16 @@ func CodecCloner(codec encoding.Codec) Cloner {
 }
 
 type funcCloner struct {
-	clone func(interface{}) interface{}
+	clone func(interface{}) (interface{}, error)
 	copy  func(in, out interface{}) error
 }
 
 var _ Cloner = (*funcCloner)(nil)
 
-func (c *funcCloner) Copy(in, out interface{}) error {
-	return c.copy(in, out)
+func (c *funcCloner) Copy(out, in interface{}) error {
+	return c.copy(out, in)
 }
 
-func (c *funcCloner) Clone(in interface{}) interface{} {
+func (c *funcCloner) Clone(in interface{}) (interface{}, error) {
 	return c.clone(in)
 }

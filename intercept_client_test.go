@@ -305,12 +305,16 @@ type streamCall struct {
 
 func (ch *testChannel) Invoke(ctx context.Context, methodName string, req, resp interface{}, opts ...grpc.CallOption) error {
 	headers, _ := metadata.FromOutgoingContext(ctx)
-	ch.calls = append(ch.calls, &unaryCall{methodName: methodName, headers: headers, req: internal.CloneMessage(req)})
+	reqClone, err := internal.CloneMessage(req)
+	if err != nil {
+		return err
+	}
+	ch.calls = append(ch.calls, &unaryCall{methodName: methodName, headers: headers, req: reqClone})
 	if ch.code != codes.OK {
 		return status.Error(ch.code, ch.code.String())
 	}
 	if ch.resp != nil {
-		return internal.CopyMessage(ch.resp, resp)
+		return internal.CopyMessage(resp, ch.resp)
 	}
 	return internal.ClearMessage(resp)
 }
@@ -377,7 +381,11 @@ func (s *testClientStream) SendMsg(m interface{}) error {
 	if err := s.ctx.Err(); err != nil {
 		return internal.TranslateContextError(err)
 	}
-	s.call.reqs = append(s.call.reqs, internal.CloneMessage(m))
+	mClone, err := internal.CloneMessage(m)
+	if err != nil {
+		return err
+	}
+	s.call.reqs = append(s.call.reqs, mClone)
 	return nil
 }
 
@@ -396,7 +404,7 @@ func (s *testClientStream) RecvMsg(m interface{}) error {
 
 	s.respCount--
 	if s.resp != nil {
-		return internal.CopyMessage(s.resp, m)
+		return internal.CopyMessage(m, s.resp)
 	}
 	return internal.ClearMessage(m)
 }

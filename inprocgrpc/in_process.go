@@ -159,11 +159,10 @@ func (c *Channel) WithServerStreamInterceptor(interceptor grpc.StreamServerInter
 // data from client to server and vice versa. Messages must be copied to avoid
 // concurrent use of message instances.
 //
-// If no cloner is configured, the default cloner can properly support
-// proto.Message instances. If the messages do not implement proto.Message, the
-// default cloner will fallback to reflection to create a shallow copy. When
-// using messages that do not implement proto.Message (or when using
-// gogo/protobuf), you should provide a custom cloner.
+// If no cloner is configured, the default cloner can only properly support
+// proto.Message instances. If the messages do not implement proto.Message (or
+// if you use gogo/protobuf, whose values implement the golang/proto interface
+// but will cause a runtime panic), you must provide a custom cloner.
 func (c *Channel) WithCloner(cloner Cloner) *Channel {
 	c.cloner = cloner
 	return c
@@ -218,11 +217,11 @@ func (c *Channel) Invoke(ctx context.Context, method string, req, resp interface
 
 	cloner := c.cloner
 	if cloner == nil {
-		cloner = DefaultCloner{}
+		cloner = ProtoCloner{}
 	}
 
 	codec := func(out interface{}) error {
-		return cloner.Copy(req, out)
+		return cloner.Copy(out, req)
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	sts := internal.UnaryServerTransportStream{Name: method}
@@ -265,7 +264,7 @@ func (c *Channel) Invoke(ctx context.Context, method string, req, resp interface
 					return status.Error(codes.Internal, "server sent unexpected response message")
 				}
 				gotResponse = true
-				if err := cloner.Copy(r.data, resp); err != nil {
+				if err := cloner.Copy(resp, r.data); err != nil {
 					return err
 				}
 			case r.headers != nil:
@@ -328,7 +327,7 @@ func (c *Channel) NewStream(ctx context.Context, desc *grpc.StreamDesc, method s
 
 	cloner := c.cloner
 	if cloner == nil {
-		cloner = DefaultCloner{}
+		cloner = ProtoCloner{}
 	}
 
 	go func() {
@@ -535,7 +534,10 @@ func (s *inProcessServerStream) SendMsg(m interface{}) error {
 			return err
 		}
 	}
-	m = s.cloner.Clone(m)
+	m, err := s.cloner.Clone(m)
+	if err != nil {
+		return err
+	}
 	return writeMessage(s.ctx, nil, s.responses, frame{data: m})
 }
 
@@ -547,7 +549,7 @@ func (s *inProcessServerStream) RecvMsg(m interface{}) error {
 	if resp.err != nil {
 		return resp.err
 	}
-	return s.cloner.Copy(resp.data, m)
+	return s.cloner.Copy(m, resp.data)
 }
 
 // inProcessClientStream is the grpc.ClientStream implementation returned to
@@ -635,7 +637,10 @@ func (s *inProcessClientStream) SendMsg(m interface{}) error {
 	if s.sendClosed {
 		return fmt.Errorf("send closed")
 	}
-	m = s.cloner.Clone(m)
+	m, err := s.cloner.Clone(m)
+	if err != nil {
+		return err
+	}
 	return writeMessage(s.ctx, s.svrCtx, s.requests, frame{data: m})
 }
 
@@ -650,7 +655,7 @@ func (s *inProcessClientStream) recvMsgLocked(m interface{}, lastMessage bool) e
 	if s.last != nil {
 		switch s.last.kind() {
 		case kindData:
-			err := s.cloner.Copy(s.last.data, m)
+			err := s.cloner.Copy(m, s.last.data)
 			if err == nil {
 				s.last = nil
 				if lastMessage {
@@ -685,7 +690,7 @@ func (s *inProcessClientStream) recvMsgLocked(m interface{}, lastMessage bool) e
 			s.last = &r
 			return internal.TranslateContextError(r.err)
 		case kindData:
-			err := s.cloner.Copy(r.data, m)
+			err := s.cloner.Copy(m, r.data)
 			if err == nil && lastMessage {
 				err = s.ensureNoMoreLocked(m)
 			}
