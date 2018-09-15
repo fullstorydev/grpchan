@@ -78,6 +78,16 @@ func (ch *Channel) Invoke(ctx context.Context, methodName string, req, resp inte
 		return statusFromContextError(err)
 	}
 
+	// we fire up a goroutine to read the response so that we can properly
+	// respect any context deadline (e.g. don't want to be blocked, reading
+	// from socket, long past requested timeout).
+	respCh := make(chan struct{})
+	go func() {
+		defer close(respCh)
+		b, err = ioutil.ReadAll(reply.Body)
+		reply.Body.Close()
+	}()
+
 	if len(copts.Peer) > 0 {
 		copts.SetPeer(getPeer(ch.BaseURL, r.TLS))
 	}
@@ -93,14 +103,6 @@ func (ch *Channel) Invoke(ctx context.Context, methodName string, req, resp inte
 		return stat.Err()
 	}
 
-	// we fire up a goroutine to read the response so that we can properly
-	// respect any context deadline (e.g. don't want to be blocked, reading
-	// from socket, long past requested timeout).
-	respCh := make(chan struct{})
-	go func() {
-		defer close(respCh)
-		b, err = ioutil.ReadAll(reply.Body)
-	}()
 	select {
 	case <-ctx.Done():
 		return statusFromContextError(ctx.Err())
