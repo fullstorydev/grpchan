@@ -155,9 +155,11 @@ func (s *TestServer) BidiStream(str TestService_BidiStreamServer) error {
 			}
 		}
 	}
-	str.SetTrailer(metadata.New(req.Trailers))
-	if req.Code != 0 {
-		return statusFromRequest(req)
+	if req != nil {
+		str.SetTrailer(metadata.New(req.Trailers))
+		if req.Code != 0 {
+			return statusFromRequest(req)
+		}
 	}
 	return nil
 }
