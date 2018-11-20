@@ -690,7 +690,7 @@ func checkMetadata(t *testing.T, expected map[string]string, actual metadata.MD,
 func checkError(t *testing.T, err error, expectedCode codes.Code, expectedDetails ...proto.Message) {
 	st, ok := status.FromError(err)
 	if !ok {
-		t.Fatalf("wrong type of error")
+		t.Fatalf("wrong type of error: %v", err)
 	}
 	if st.Code() != expectedCode {
 		t.Fatalf("wrong response code: %v != %v", st.Code(), expectedCode)
