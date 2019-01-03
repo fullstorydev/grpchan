@@ -241,9 +241,7 @@ func asTrailerProto(md metadata.MD) map[string]*TrailerValues {
 	result := map[string]*TrailerValues{}
 	for k, vs := range md {
 		tvs := TrailerValues{}
-		for _, v := range vs {
-			tvs.Values = append(tvs.Values, v)
-		}
+		tvs.Values = append(tvs.Values, vs...)
 		result[k] = &tvs
 	}
 	return result

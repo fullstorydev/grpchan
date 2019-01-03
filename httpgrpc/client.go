@@ -496,7 +496,7 @@ func headersFromContext(ctx context.Context) http.Header {
 		toHeaders(md, h, "")
 	}
 	if deadline, ok := ctx.Deadline(); ok {
-		timeout := deadline.Sub(time.Now())
+		timeout := time.Until(deadline)
 		millis := int64(timeout / time.Millisecond)
 		if millis <= 0 {
 			millis = 1
