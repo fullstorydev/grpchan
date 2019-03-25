@@ -5,6 +5,7 @@ import (
 	"reflect"
 
 	"github.com/golang/protobuf/proto"
+	"github.com/jhump/protoreflect/dynamic"
 	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -19,19 +20,15 @@ func CopyMessage(out, in interface{}) error {
 	if !ok {
 		return fmt.Errorf("value to copy is not a proto.Message: %T; use a custom cloner", in)
 	}
-	if reflect.TypeOf(in) != reflect.TypeOf(out) {
-		return fmt.Errorf("incompatible types: %v != %v", reflect.TypeOf(in), reflect.TypeOf(out))
-	}
-	rvOut := reflect.ValueOf(out)
-	if rvOut.Kind() == reflect.Ptr && rvOut.IsNil() {
-		return fmt.Errorf("copy destination cannot be nil")
+	pmOut, ok := out.(proto.Message)
+	if !ok {
+		return fmt.Errorf("destination for copy is not a proto.Message: %T; use a custom cloner", in)
 	}
 
-	// this does a proper deep copy
-	pmOut := out.(proto.Message)
 	pmOut.Reset()
-	proto.Merge(pmOut, pmIn)
-	return nil
+	// This will check that types are compatible and return an error if not.
+	// Unlike proto.Merge, this allows one or the other to be a dynamic message.
+	return dynamic.TryMerge(pmOut, pmIn)
 }
 
 // CloneMessage returns a copy of the given value.
