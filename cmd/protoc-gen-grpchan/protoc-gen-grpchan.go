@@ -7,6 +7,8 @@ package main
 import (
 	"fmt"
 	"path"
+	"strings"
+	"text/template"
 
 	"github.com/jhump/gopoet"
 	"github.com/jhump/goprotoc/plugins"
@@ -19,9 +21,21 @@ func main() {
 
 func doCodeGen(req *plugins.CodeGenRequest, resp *plugins.CodeGenResponse) error {
 	var names plugins.GoNames
+	args, err := parseArgs(req.Args)
+	if err != nil {
+		return err
+	}
 	for _, fd := range req.Files {
 		if err := generateChanStubs(fd, &names, resp); err != nil {
-			return fmt.Errorf("%s: %v", fd.GetName(), err)
+			if fe, ok := err.(*gopoet.FormatError); ok {
+				if args.debug {
+					return fmt.Errorf("%s: error in generated Go code: %v:\n%s", fd.GetName(), err, fe.Unformatted)
+				} else {
+					return fmt.Errorf("%s: error in generated Go code: %v (use debug=true arg to show full source)", fd.GetName(), err)
+				}
+			} else {
+				return fmt.Errorf("%s: %v", fd.GetName(), err)
+			}
 		}
 	}
 	return nil
@@ -63,7 +77,23 @@ func generateChanStubs(fd *desc.FileDescriptor, names *plugins.GoNames, resp *pl
 			Printlnf("return &%s{ch: ch}", cc))
 
 		streamCount := 0
+		tmpls := templates{}
 		for _, md := range sd.GetMethods() {
+			methodInfo := struct {
+				ServiceName  string
+				MethodName   string
+				ServiceDesc  string
+				StreamClient string
+				StreamIndex  int
+				RequestType  gopoet.TypeName
+			}{
+				ServiceName:  sd.GetFullyQualifiedName(),
+				MethodName:   md.GetName(),
+				ServiceDesc:  names.GoNameOfServiceDesc(sd),
+				StreamClient: names.GoTypeForStreamClientImpl(md),
+				StreamIndex:  streamCount,
+				RequestType:  names.GoTypeForMessage(md.GetOutputType()),
+			}
 			mtdName := names.CamelCase(md.GetName())
 			if md.IsClientStreaming() {
 				// bidi or client streaming method
@@ -73,12 +103,13 @@ func generateChanStubs(fd *desc.FileDescriptor, names *plugins.GoNames, resp *pl
 					SetVariadic(true).
 					AddResult("", names.GoTypeForStreamClient(md)).
 					AddResult("", gopoet.ErrorType).
-					Printlnf("stream, err := c.ch.NewStream(ctx, &%s.Streams[%d], \"/%s/%s\", opts...)", names.GoNameOfServiceDesc(sd), streamCount, sd.GetFullyQualifiedName(), md.GetName()).
-					Printlnf("if err != nil {").
-					Printlnf("    return nil, err").
-					Printlnf("}").
-					Printlnf("x := &%s{stream}", names.GoTypeForStreamClientImpl(md)).
-					Printlnf("return x, nil"))
+					RenderCode(tmpls.makeTemplate(
+						`stream, err := c.ch.NewStream(ctx, &{{.ServiceDesc}}.Streams[{{.StreamIndex}}], "/{{.ServiceName}}/{{.MethodName}}", opts...)
+						if err != nil {
+							return nil, err
+						}
+						x := &{{.StreamClient}}{stream}
+						return x, nil`), &methodInfo))
 				streamCount++
 			} else if md.IsServerStreaming() {
 				// server streaming method
@@ -89,18 +120,19 @@ func generateChanStubs(fd *desc.FileDescriptor, names *plugins.GoNames, resp *pl
 					SetVariadic(true).
 					AddResult("", names.GoTypeForStreamClient(md)).
 					AddResult("", gopoet.ErrorType).
-					Printlnf("stream, err := c.ch.NewStream(ctx, &%s.Streams[%d], \"/%s/%s\", opts...)", names.GoNameOfServiceDesc(sd), streamCount, sd.GetFullyQualifiedName(), md.GetName()).
-					Printlnf("if err != nil {").
-					Printlnf("    return nil, err").
-					Printlnf("}").
-					Printlnf("x := &%s{stream}", names.GoTypeForStreamClientImpl(md)).
-					Printlnf("if err := x.ClientStream.SendMsg(in); err != nil {").
-					Printlnf("    return nil, err").
-					Printlnf("}").
-					Printlnf("if err := x.ClientStream.CloseSend(); err != nil {").
-					Printlnf("    return nil, err").
-					Printlnf("}").
-					Printlnf("return x, nil"))
+					RenderCode(tmpls.makeTemplate(
+						`stream, err := c.ch.NewStream(ctx, &{{.ServiceDesc}}.Streams[{{.StreamIndex}}], "/{{.ServiceName}}/{{.MethodName}}", opts...)
+						if err != nil {
+							return nil, err
+						}
+						x := &{{.StreamClient}}{stream}
+						if err := x.ClientStream.SendMsg(in); err != nil {
+						    return nil, err
+						}
+						if err := x.ClientStream.CloseSend(); err != nil {
+						    return nil, err
+						}
+						return x, nil`), &methodInfo))
 				streamCount++
 			} else {
 				// unary method
@@ -111,16 +143,58 @@ func generateChanStubs(fd *desc.FileDescriptor, names *plugins.GoNames, resp *pl
 					SetVariadic(true).
 					AddResult("", names.GoTypeOfResponse(md)).
 					AddResult("", gopoet.ErrorType).
-					Printlnf("out := new(%s)", names.GoTypeForMessage(md.GetOutputType())).
-					Printlnf("err := c.ch.Invoke(ctx, \"/%s/%s\", in, out, opts...)", sd.GetFullyQualifiedName(), md.GetName()).
-					Printlnf("if err != nil {").
-					Printlnf("    return nil, err").
-					Printlnf("}").
-					Printlnf("return out, nil"))
+					RenderCode(tmpls.makeTemplate(
+						`out := new({{.RequestType}})
+						err := c.ch.Invoke(ctx, "/{{.ServiceName}}/{{.MethodName}}", in, out, opts...)
+						if err != nil {
+							return nil, err
+						}
+						return out, nil`), &methodInfo))
 			}
 		}
 	}
 
 	out := resp.OutputFile(filename)
 	return gopoet.WriteGoFile(out, f)
+}
+
+type templates map[string]*template.Template
+
+func (t templates) makeTemplate(templateText string) *template.Template {
+	tpl := t[templateText]
+	if tpl == nil {
+		tpl = template.Must(template.New("code").Parse(templateText))
+		t[templateText] = tpl
+	}
+	return tpl
+}
+
+type codeGenArgs struct {
+	debug bool
+}
+
+func parseArgs(args []string) (codeGenArgs, error) {
+	var result codeGenArgs
+	for _, arg := range args {
+		vals := strings.SplitN(arg, "=", 2)
+		switch vals[0] {
+		case "debug":
+			if len(vals) == 1 {
+				// if not value, assume "true"
+				result.debug = true
+				break
+			}
+			switch strings.ToLower(vals[1]) {
+			case "true", "on", "yes", "1":
+				result.debug = true
+			case "false", "off", "no", "0":
+				result.debug = false
+			default:
+				return result, fmt.Errorf("invalid boolean arg for option 'debug': %s", vals[1])
+			}
+		default:
+			return result, fmt.Errorf("unknown plugin argument: %s", vals[0])
+		}
+	}
+	return result, nil
 }
