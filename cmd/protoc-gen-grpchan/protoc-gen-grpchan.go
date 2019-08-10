@@ -192,8 +192,6 @@ func parseArgs(args []string) (codeGenArgs, error) {
 			default:
 				return result, fmt.Errorf("invalid boolean arg for option 'debug': %s", vals[1])
 			}
-		default:
-			return result, fmt.Errorf("unknown plugin argument: %s", vals[0])
 		}
 	}
 	return result, nil
