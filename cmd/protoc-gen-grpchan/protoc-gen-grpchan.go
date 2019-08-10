@@ -20,10 +20,18 @@ func main() {
 }
 
 func doCodeGen(req *plugins.CodeGenRequest, resp *plugins.CodeGenResponse) error {
-	var names plugins.GoNames
 	args, err := parseArgs(req.Args)
 	if err != nil {
 		return err
+	}
+	names := plugins.GoNames{ImportMap: args.importMap}
+	if args.importPath != "" {
+		// if we're overriding import path, go ahead and query
+		// package for each file, which will cache the override name
+		// so all subsequent queries are consistent
+		for _, fd := range req.Files {
+			names.GoPackageForFileWithOverride(fd, args.importPath)
+		}
 	}
 	for _, fd := range req.Files {
 		if err := generateChanStubs(fd, &names, resp); err != nil {
@@ -170,7 +178,9 @@ func (t templates) makeTemplate(templateText string) *template.Template {
 }
 
 type codeGenArgs struct {
-	debug bool
+	debug      bool
+	importPath string
+	importMap  map[string]string
 }
 
 func parseArgs(args []string) (codeGenArgs, error) {
@@ -180,7 +190,7 @@ func parseArgs(args []string) (codeGenArgs, error) {
 		switch vals[0] {
 		case "debug":
 			if len(vals) == 1 {
-				// if not value, assume "true"
+				// if no value, assume "true"
 				result.debug = true
 				break
 			}
@@ -192,8 +202,26 @@ func parseArgs(args []string) (codeGenArgs, error) {
 			default:
 				return result, fmt.Errorf("invalid boolean arg for option 'debug': %s", vals[1])
 			}
+
+		case "import_path":
+			if len(vals) == 1 {
+				return result, fmt.Errorf("plugin option 'import_path' requires an argument")
+			}
+			result.importPath = vals[1]
+
 		default:
-			return result, fmt.Errorf("unknown plugin argument: %s", vals[0])
+			if len(vals[0]) > 1 && vals[0][0] == 'M' {
+				if len(vals) == 1 {
+					return result, fmt.Errorf("plugin 'M' options require an argument: %s", vals[0])
+				}
+				if result.importMap == nil {
+					result.importMap = map[string]string{}
+				}
+				result.importMap[vals[0][1:]] = vals[1]
+				break
+			}
+
+			return result, fmt.Errorf("unknown plugin option: %s", vals[0])
 		}
 	}
 	return result, nil
