@@ -25,8 +25,16 @@ func doCodeGen(req *plugins.CodeGenRequest, resp *plugins.CodeGenResponse) error
 		return err
 	}
 	names := plugins.GoNames{ImportMap: args.importMap}
+	if args.importPath != "" {
+		// if we're overriding import path, go ahead and query
+		// package for each file, which will cache the override name
+		// so all subsequent queries are consistent
+		for _, fd := range req.Files {
+			names.GoPackageForFileWithOverride(fd, args.importPath)
+		}
+	}
 	for _, fd := range req.Files {
-		if err := generateChanStubs(fd, args.importPath, &names, resp); err != nil {
+		if err := generateChanStubs(fd, &names, resp); err != nil {
 			if fe, ok := err.(*gopoet.FormatError); ok {
 				if args.debug {
 					return fmt.Errorf("%s: error in generated Go code: %v:\n%s", fd.GetName(), err, fe.Unformatted)
@@ -46,12 +54,12 @@ var typeOfChannel = gopoet.NamedType(gopoet.NewSymbol("github.com/fullstorydev/g
 var typeOfContext = gopoet.NamedType(gopoet.NewSymbol("golang.org/x/net/context", "Context"))
 var typeOfCallOptions = gopoet.SliceType(gopoet.NamedType(gopoet.NewSymbol("google.golang.org/grpc", "CallOption")))
 
-func generateChanStubs(fd *desc.FileDescriptor, importPath string, names *plugins.GoNames, resp *plugins.CodeGenResponse) error {
+func generateChanStubs(fd *desc.FileDescriptor, names *plugins.GoNames, resp *plugins.CodeGenResponse) error {
 	if len(fd.GetServices()) == 0 {
 		return nil
 	}
 
-	pkg := names.GoPackageForFileWithOverride(fd, importPath)
+	pkg := names.GoPackageForFile(fd)
 	filename := names.OutputFilenameFor(fd, ".pb.grpchan.go")
 	f := gopoet.NewGoFile(path.Base(filename), pkg.ImportPath, pkg.Name)
 
@@ -210,6 +218,7 @@ func parseArgs(args []string) (codeGenArgs, error) {
 					result.importMap = map[string]string{}
 				}
 				result.importMap[vals[0][1:]] = vals[1]
+				break
 			}
 
 			return result, fmt.Errorf("unknown plugin option: %s", vals[0])
