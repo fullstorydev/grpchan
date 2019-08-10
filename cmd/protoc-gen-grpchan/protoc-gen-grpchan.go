@@ -20,13 +20,13 @@ func main() {
 }
 
 func doCodeGen(req *plugins.CodeGenRequest, resp *plugins.CodeGenResponse) error {
-	var names plugins.GoNames
 	args, err := parseArgs(req.Args)
 	if err != nil {
 		return err
 	}
+	names := plugins.GoNames{ImportMap: args.importMap}
 	for _, fd := range req.Files {
-		if err := generateChanStubs(fd, &names, resp); err != nil {
+		if err := generateChanStubs(fd, args.importPath, &names, resp); err != nil {
 			if fe, ok := err.(*gopoet.FormatError); ok {
 				if args.debug {
 					return fmt.Errorf("%s: error in generated Go code: %v:\n%s", fd.GetName(), err, fe.Unformatted)
@@ -46,12 +46,12 @@ var typeOfChannel = gopoet.NamedType(gopoet.NewSymbol("github.com/fullstorydev/g
 var typeOfContext = gopoet.NamedType(gopoet.NewSymbol("golang.org/x/net/context", "Context"))
 var typeOfCallOptions = gopoet.SliceType(gopoet.NamedType(gopoet.NewSymbol("google.golang.org/grpc", "CallOption")))
 
-func generateChanStubs(fd *desc.FileDescriptor, names *plugins.GoNames, resp *plugins.CodeGenResponse) error {
+func generateChanStubs(fd *desc.FileDescriptor, importPath string, names *plugins.GoNames, resp *plugins.CodeGenResponse) error {
 	if len(fd.GetServices()) == 0 {
 		return nil
 	}
 
-	pkg := names.GoPackageForFile(fd)
+	pkg := names.GoPackageForFileWithOverride(fd, importPath)
 	filename := names.OutputFilenameFor(fd, ".pb.grpchan.go")
 	f := gopoet.NewGoFile(path.Base(filename), pkg.ImportPath, pkg.Name)
 
@@ -170,7 +170,9 @@ func (t templates) makeTemplate(templateText string) *template.Template {
 }
 
 type codeGenArgs struct {
-	debug bool
+	debug      bool
+	importPath string
+	importMap  map[string]string
 }
 
 func parseArgs(args []string) (codeGenArgs, error) {
@@ -180,7 +182,7 @@ func parseArgs(args []string) (codeGenArgs, error) {
 		switch vals[0] {
 		case "debug":
 			if len(vals) == 1 {
-				// if not value, assume "true"
+				// if no value, assume "true"
 				result.debug = true
 				break
 			}
@@ -192,8 +194,25 @@ func parseArgs(args []string) (codeGenArgs, error) {
 			default:
 				return result, fmt.Errorf("invalid boolean arg for option 'debug': %s", vals[1])
 			}
+
+		case "import_path":
+			if len(vals) == 1 {
+				return result, fmt.Errorf("plugin option 'import_path' requires an argument")
+			}
+			result.importPath = vals[1]
+
 		default:
-			return result, fmt.Errorf("unknown plugin argument: %s", vals[0])
+			if len(vals[0]) > 1 && vals[0][0] == 'M' {
+				if len(vals) == 1 {
+					return result, fmt.Errorf("plugin 'M' options require an argument: %s", vals[0])
+				}
+				if result.importMap == nil {
+					result.importMap = map[string]string{}
+				}
+				result.importMap[vals[0][1:]] = vals[1]
+			}
+
+			return result, fmt.Errorf("unknown plugin option: %s", vals[0])
 		}
 	}
 	return result, nil
