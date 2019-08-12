@@ -30,7 +30,11 @@ func doCodeGen(req *plugins.CodeGenRequest, resp *plugins.CodeGenResponse) error
 		// package for each file, which will cache the override name
 		// so all subsequent queries are consistent
 		for _, fd := range req.Files {
-			names.GoPackageForFileWithOverride(fd, args.importPath)
+			// Only use the override for files that don't otherwise have an
+			// entry in the specified import map
+			if _, ok := args.importMap[fd.GetName()]; !ok {
+				names.GoPackageForFileWithOverride(fd, args.importPath)
+			}
 		}
 	}
 	for _, fd := range req.Files {
