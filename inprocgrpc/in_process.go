@@ -372,6 +372,8 @@ func (c *Channel) NewStream(ctx context.Context, desc *grpc.StreamDesc, method s
 	return cs, nil
 }
 
+var clientContextKey = "holds a client context"
+
 func makeServerContext(ctx context.Context) context.Context {
 	// We don't want the server have any of the values in the client's context
 	// since that can inadvertently leak state from the client to the server.
@@ -383,8 +385,17 @@ func makeServerContext(ctx context.Context) context.Context {
 		newCtx = metadata.NewIncomingContext(newCtx, meta)
 	}
 	newCtx = peer.NewContext(newCtx, &inprocessPeer)
-
+	newCtx = context.WithValue(newCtx, &clientContextKey, ctx)
 	return newCtx
+}
+
+// ClientContext, when called on a server context, returns the original client context
+// passed into Channel.Invoke() / Channel.NewStream().
+func ClientContext(ctx context.Context) context.Context {
+	if clientCtx, ok := ctx.Value(&clientContextKey).(context.Context); ok {
+		return clientCtx
+	}
+	return nil
 }
 
 // noValuesContext wraps a context but prevents access to its values. This is
