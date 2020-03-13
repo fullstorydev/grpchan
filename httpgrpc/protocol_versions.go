@@ -1,5 +1,7 @@
 package httpgrpc
 
+import "github.com/golang/protobuf/jsonpb"
+
 // If the on-the-wire encoding every needs to be changed in a backwards-incompatible way,
 // here are the steps for doing so:
 //
@@ -29,4 +31,19 @@ package httpgrpc
 const (
 	UnaryRpcContentType_V1  = "application/x-protobuf"
 	StreamRpcContentType_V1 = "application/x-httpgrpc-proto+v1"
+
+	GrpcWebJsonContentType_V1 = "application/grpc-web+json"
+
+	ApplicationJson = "application/json"
+)
+
+var (
+	jsonMarshaler = jsonpb.Marshaler{
+		EnumsAsInts:  true,
+		EmitDefaults: true,
+	}
+
+	jsonUnmarshaler = jsonpb.Unmarshaler{
+		AllowUnknownFields: true,
+	}
 )
