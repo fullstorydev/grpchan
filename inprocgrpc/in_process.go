@@ -193,6 +193,10 @@ func (c *Channel) Invoke(ctx context.Context, method string, req, resp interface
 	copts := internal.GetCallOptions(opts)
 	copts.SetPeer(&inprocessPeer)
 
+	if isNil(req) {
+		return status.Errorf(codes.Internal, "request message is nil")
+	}
+
 	if method[0] != '/' {
 		method = "/" + method
 	}
@@ -236,16 +240,20 @@ func (c *Channel) Invoke(ctx context.Context, method string, req, resp interface
 		ctx := grpc.NewContextWithServerTransportStream(makeServerContext(ctx), &sts)
 		v, err := md.Handler(handler, ctx, codec, c.unaryInterceptor)
 		if h := sts.GetHeaders(); len(h) > 0 {
-			writeMessage(ctx, nil, ch, frame{headers: h})
+			_ = writeMessage(ctx, nil, ch, frame{headers: h})
 		}
 		if err == nil {
-			writeMessage(ctx, nil, ch, frame{data: v})
+			if isNil(v) {
+				err = status.Errorf(codes.Internal, "handler returned neither error nor response message")
+			} else {
+				_ = writeMessage(ctx, nil, ch, frame{data: v})
+			}
 		}
 		if t := sts.GetTrailers(); len(t) > 0 {
-			writeMessage(ctx, nil, ch, frame{trailers: t})
+			_ = writeMessage(ctx, nil, ch, frame{trailers: t})
 		}
 		if err != nil {
-			writeMessage(ctx, nil, ch, frame{err: err})
+			_ = writeMessage(ctx, nil, ch, frame{err: err})
 		}
 	}()
 
@@ -253,8 +261,12 @@ func (c *Channel) Invoke(ctx context.Context, method string, req, resp interface
 	for {
 		select {
 		case r, ok := <-ch:
-			if !ok && !gotResponse {
-				return io.EOF
+			if !ok {
+				// no more messages
+				if !gotResponse {
+					return io.EOF
+				}
+				return nil
 			}
 			switch {
 			case r.err != nil:
@@ -272,7 +284,8 @@ func (c *Channel) Invoke(ctx context.Context, method string, req, resp interface
 			case r.trailers != nil:
 				copts.SetTrailers(r.trailers)
 			default:
-				return nil
+				// TODO: panic?
+				return status.Error(codes.Internal, "server sent empty frame")
 			}
 		case <-ctx.Done():
 			return internal.TranslateContextError(ctx.Err())
@@ -498,21 +511,21 @@ func (s *inProcessServerStream) finish(err error) {
 	}()
 
 	if s.state == streamStateHeaders && len(s.headers) > 0 {
-		writeMessage(s.ctx, nil, s.responses, frame{headers: s.headers})
+		_ = writeMessage(s.ctx, nil, s.responses, frame{headers: s.headers})
 	}
 
 	if len(s.trailers) > 0 {
-		writeMessage(s.ctx, nil, s.responses, frame{trailers: s.trailers})
+		_ = writeMessage(s.ctx, nil, s.responses, frame{trailers: s.trailers})
 	}
 	s.trailers = nil
 
 	if err != nil {
-		writeMessage(s.ctx, nil, s.responses, frame{err: err})
+		_ = writeMessage(s.ctx, nil, s.responses, frame{err: err})
 	}
 }
 
 func (s *inProcessServerStream) SetTrailer(md metadata.MD) {
-	s.TrySetTrailer(md) // must ignore return value
+	_ = s.TrySetTrailer(md) // must ignore return value
 }
 
 func (s *inProcessServerStream) TrySetTrailer(md metadata.MD) error {
@@ -537,6 +550,7 @@ func (s *inProcessServerStream) Context() context.Context {
 func (s *inProcessServerStream) SendMsg(m interface{}) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
 	if s.ctx.Err() != nil || s.state == streamStateClosed {
 		return io.EOF
 	}
@@ -545,6 +559,10 @@ func (s *inProcessServerStream) SendMsg(m interface{}) error {
 			return err
 		}
 	}
+	if isNil(m) {
+		return status.Errorf(codes.Internal, "message to send is nil")
+	}
+
 	m, err := s.cloner.Clone(m)
 	if err != nil {
 		return err
@@ -648,6 +666,10 @@ func (s *inProcessClientStream) SendMsg(m interface{}) error {
 	if s.sendClosed {
 		return fmt.Errorf("send closed")
 	}
+	if isNil(m) {
+		return status.Errorf(codes.Internal, "message to send is nil")
+	}
+
 	m, err := s.cloner.Clone(m)
 	if err != nil {
 		return err
@@ -749,4 +771,12 @@ func writeMessage(ctx, remoteCtx context.Context, ch chan<- frame, m frame) erro
 		return io.EOF
 	}
 	return ctx.Err()
+}
+
+func isNil(m interface{}) bool {
+	if m == nil {
+		return true
+	}
+	rv := reflect.ValueOf(m)
+	return rv.Kind() == reflect.Ptr && rv.IsNil()
 }
