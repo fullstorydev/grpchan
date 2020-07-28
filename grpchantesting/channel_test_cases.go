@@ -3,6 +3,7 @@ package grpchantesting
 import (
 	"bytes"
 	"io"
+	"strings"
 	"testing"
 	"time"
 
@@ -42,22 +43,22 @@ func RunChannelTestCases(t *testing.T, ch grpchan.Channel, supportsFullDuplex bo
 var (
 	testPayload = []byte{100, 90, 80, 70, 60, 50, 40, 30, 20, 10, 0}
 
-	testOutgoingMd = map[string]string{
-		"foo":        "bar",
-		"baz":        "bedazzle",
-		"pickle-bin": string(testPayload),
+	testOutgoingMd = map[string][]byte{
+		"foo":        []byte("bar"),
+		"baz":        []byte("bedazzle"),
+		"pickle-bin": testPayload,
 	}
 
-	testMdHeaders = map[string]string{
-		"foo1":        "bar4",
-		"baz2":        "bedazzle5",
-		"pickle3-bin": string(testPayload),
+	testMdHeaders = map[string][]byte{
+		"foo1":        []byte("bar4"),
+		"baz2":        []byte("bedazzle5"),
+		"pickle3-bin": testPayload,
 	}
 
-	testMdTrailers = map[string]string{
-		"4foo4":        "7bar7",
-		"5baz5":        "8bedazzle8",
-		"6pickle6-bin": string(testPayload),
+	testMdTrailers = map[string][]byte{
+		"4foo4":        []byte("7bar7"),
+		"5baz5":        []byte("8bedazzle8"),
+		"6pickle6-bin": testPayload,
 	}
 
 	testErrorMessages = []proto.Message{
@@ -87,8 +88,17 @@ func init() {
 	}
 }
 
+func MetadataNew(m map[string][]byte) metadata.MD {
+	md := metadata.MD{}
+	for k, val := range m {
+		key := strings.ToLower(k)
+		md[key] = append(md[key], string(val))
+	}
+	return md
+}
+
 func testUnary(t *testing.T, cli TestServiceClient) {
-	ctx := metadata.NewOutgoingContext(context.Background(), metadata.New(testOutgoingMd))
+	ctx := metadata.NewOutgoingContext(context.Background(), MetadataNew(testOutgoingMd))
 	reqPrototype := Message{
 		Payload:  testPayload,
 		Headers:  testMdHeaders,
@@ -138,7 +148,7 @@ func testUnary(t *testing.T, cli TestServiceClient) {
 }
 
 func testClientStream(t *testing.T, cli TestServiceClient) {
-	ctx := metadata.NewOutgoingContext(context.Background(), metadata.New(testOutgoingMd))
+	ctx := metadata.NewOutgoingContext(context.Background(), MetadataNew(testOutgoingMd))
 	reqPrototype := Message{
 		Payload:  testPayload,
 		Headers:  testMdHeaders,
@@ -245,7 +255,7 @@ func testClientStream(t *testing.T, cli TestServiceClient) {
 }
 
 func testServerStream(t *testing.T, cli TestServiceClient) {
-	ctx := metadata.NewOutgoingContext(context.Background(), metadata.New(testOutgoingMd))
+	ctx := metadata.NewOutgoingContext(context.Background(), MetadataNew(testOutgoingMd))
 	reqPrototype := Message{
 		Payload:  testPayload,
 		Count:    5,
@@ -343,7 +353,7 @@ func testServerStream(t *testing.T, cli TestServiceClient) {
 }
 
 func testHalfDuplexBidiStream(t *testing.T, cli TestServiceClient) {
-	ctx := metadata.NewOutgoingContext(context.Background(), metadata.New(testOutgoingMd))
+	ctx := metadata.NewOutgoingContext(context.Background(), MetadataNew(testOutgoingMd))
 	reqPrototype := Message{
 		Payload:  testPayload,
 		Count:    -1, // enables half-duplex mode in server
@@ -510,7 +520,7 @@ func testHalfDuplexBidiStream(t *testing.T, cli TestServiceClient) {
 }
 
 func testFullDuplexBidiStream(t *testing.T, cli TestServiceClient) {
-	ctx := metadata.NewOutgoingContext(context.Background(), metadata.New(testOutgoingMd))
+	ctx := metadata.NewOutgoingContext(context.Background(), MetadataNew(testOutgoingMd))
 	reqPrototype := Message{
 		Payload:  testPayload,
 		Headers:  testMdHeaders,
@@ -646,24 +656,24 @@ func testFullDuplexBidiStream(t *testing.T, cli TestServiceClient) {
 	})
 }
 
-func checkRequestHeaders(t *testing.T, expected, actual map[string]string) {
+func checkRequestHeaders(t *testing.T, expected, actual map[string][]byte) {
 	// we don't just do a strict equals check because the actual headers
 	// echoed back could have extra headers that were added implicitly
 	// by the GRPC-over-HTTP client (such as GRPC-Timeout, Content-Type, etc).
 	for k, v := range expected {
 		v2, ok := actual[k]
-		if !ok || v2 != v {
+		if !ok || !bytes.Equal(v2, v) {
 			t.Fatalf("wrong headers echoed back: expecting header %s to be %q, instead was %q", k, v, v2)
 		}
 	}
 }
 
-func checkResponseMetadata(t *testing.T, cs grpc.ClientStream, hdrs map[string]string, tlrs map[string]string) {
+func checkResponseMetadata(t *testing.T, cs grpc.ClientStream, hdrs map[string][]byte, tlrs map[string][]byte) {
 	checkResponseHeaders(t, cs, hdrs)
 	checkResponseTrailers(t, cs, tlrs)
 }
 
-func checkResponseHeaders(t *testing.T, cs grpc.ClientStream, md map[string]string) {
+func checkResponseHeaders(t *testing.T, cs grpc.ClientStream, md map[string][]byte) {
 	h, err := cs.Header()
 	if err != nil {
 		t.Fatalf("failed to get header metadata: %v", err)
@@ -671,17 +681,17 @@ func checkResponseHeaders(t *testing.T, cs grpc.ClientStream, md map[string]stri
 	checkMetadata(t, md, h, "header")
 }
 
-func checkResponseTrailers(t *testing.T, cs grpc.ClientStream, md map[string]string) {
+func checkResponseTrailers(t *testing.T, cs grpc.ClientStream, md map[string][]byte) {
 	checkMetadata(t, md, cs.Trailer(), "trailer")
 }
 
-func checkMetadata(t *testing.T, expected map[string]string, actual metadata.MD, name string) {
+func checkMetadata(t *testing.T, expected map[string][]byte, actual metadata.MD, name string) {
 	// we don't just do a strict equals check because the actual headers
 	// echoed back could have extra headers that were added implicitly
 	// by the GRPC-over-HTTP client (such as GRPC-Timeout, Content-Type, etc).
 	for k, v := range expected {
 		v2, ok := actual[k]
-		if !ok || len(v2) != 1 || v2[0] != v {
+		if !ok || len(v2) != 1 || !bytes.Equal([]byte(v2[0]), v) {
 			t.Fatalf("wrong %ss echoed back: expecting %s %s to be [%s], instead was %v", name, name, k, v, v2)
 		}
 	}

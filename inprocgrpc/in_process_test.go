@@ -51,7 +51,7 @@ func TestUseDynamicMessage(t *testing.T) {
 	grpchantesting.RegisterHandlerTestService(&cc, svr)
 	stub := grpcdynamic.NewStub(&cc)
 
-	fd, err := desc.LoadFileDescriptor("test.proto")
+	fd, err := desc.LoadFileDescriptor("github.com/fullstorydev/grpchan/grpchantesting/test.proto")
 	if err != nil {
 		t.Fatalf("failed to load descriptor for test.proto: %v", err)
 	}
@@ -69,17 +69,17 @@ func TestUseDynamicMessage(t *testing.T) {
 	}
 
 	testPayload := []byte{100, 90, 80, 70, 60, 50, 40, 30, 20, 10, 0}
-	testOutgoingMd := map[string]string{
-		"foo": "bar",
+	testOutgoingMd := map[string][]byte{
+		"foo": []byte("bar"),
 	}
-	testMdHeaders := map[string]string{
-		"foo1": "bar2",
+	testMdHeaders := map[string][]byte{
+		"foo1": []byte("bar2"),
 	}
-	testMdTrailers := map[string]string{
-		"foo3": "bar4",
+	testMdTrailers := map[string][]byte{
+		"foo3": []byte("bar4"),
 	}
 
-	ctx := metadata.NewOutgoingContext(context.Background(), metadata.New(testOutgoingMd))
+	ctx := metadata.NewOutgoingContext(context.Background(), grpchantesting.MetadataNew(testOutgoingMd))
 	req := dynamic.NewMessage(md)
 	req.SetFieldByName("payload", testPayload)
 	req.SetFieldByName("headers", testMdHeaders)
@@ -96,31 +96,31 @@ func TestUseDynamicMessage(t *testing.T) {
 	if !bytes.Equal(testPayload, payload.([]byte)) {
 		t.Fatalf("wrong payload returned: expecting %v; got %v", testPayload, payload)
 	}
-	reqHeaders := map[string]string{}
+	reqHeaders := map[string][]byte{}
 	for k, v := range msg.GetFieldByName("headers").(map[interface{}]interface{}) {
-		reqHeaders[k.(string)] = v.(string)
+		reqHeaders[k.(string)] = v.([]byte)
 	}
 	if !reflect.DeepEqual(testOutgoingMd, reqHeaders) {
 		t.Fatalf("wrong request headers echoed back: expecting %v; got %v", testOutgoingMd, reqHeaders)
 	}
 
-	actualHdrs := map[string]string{}
+	actualHdrs := map[string][]byte{}
 	for k, v := range hdr {
 		if len(v) > 1 {
 			t.Fatalf("too many values for response header %q", k)
 		}
-		actualHdrs[k] = v[0]
+		actualHdrs[k] = []byte(v[0])
 	}
 	if !reflect.DeepEqual(testMdHeaders, actualHdrs) {
 		t.Fatalf("wrong response headers echoed back: expecting %v; got %v", testMdHeaders, actualHdrs)
 	}
 
-	actualTlrs := map[string]string{}
+	actualTlrs := map[string][]byte{}
 	for k, v := range tlr {
 		if len(v) > 1 {
 			t.Fatalf("too many values for response trailer %q", k)
 		}
-		actualTlrs[k] = v[0]
+		actualTlrs[k] = []byte(v[0])
 	}
 	if !reflect.DeepEqual(testMdTrailers, actualTlrs) {
 		t.Fatalf("wrong response trailers echoed back: expecting %v; got %v", testMdTrailers, actualTlrs)
