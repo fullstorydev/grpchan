@@ -22,8 +22,8 @@ func (s *TestServer) Unary(ctx context.Context, req *Message) (*Message, error) 
 	if req.DelayMillis > 0 {
 		time.Sleep(time.Millisecond * time.Duration(req.DelayMillis))
 	}
-	grpc.SetHeader(ctx, metadata.New(req.Headers))
-	grpc.SetTrailer(ctx, metadata.New(req.Trailers))
+	grpc.SetHeader(ctx, MetadataNew(req.Headers))
+	grpc.SetTrailer(ctx, MetadataNew(req.Trailers))
 	if req.Code != 0 {
 		return nil, statusFromRequest(req)
 	}
@@ -66,10 +66,10 @@ func (s *TestServer) ClientStream(cs TestService_ClientStreamServer) error {
 	if req.DelayMillis > 0 {
 		time.Sleep(time.Millisecond * time.Duration(req.DelayMillis))
 	}
-	if err := cs.SetHeader(metadata.New(req.Headers)); err != nil {
+	if err := cs.SetHeader(MetadataNew(req.Headers)); err != nil {
 		return err
 	}
-	cs.SetTrailer(metadata.New(req.Trailers))
+	cs.SetTrailer(MetadataNew(req.Trailers))
 	if req.Code != 0 {
 		return statusFromRequest(req)
 	}
@@ -87,7 +87,7 @@ func (s *TestServer) ServerStream(req *Message, ss TestService_ServerStreamServe
 		time.Sleep(time.Millisecond * time.Duration(req.DelayMillis))
 	}
 	md, _ := metadata.FromIncomingContext(ss.Context())
-	if err := ss.SetHeader(metadata.New(req.Headers)); err != nil {
+	if err := ss.SetHeader(MetadataNew(req.Headers)); err != nil {
 		return err
 	}
 	for i := 0; i < int(req.Count); i++ {
@@ -99,7 +99,7 @@ func (s *TestServer) ServerStream(req *Message, ss TestService_ServerStreamServe
 			return err
 		}
 	}
-	ss.SetTrailer(metadata.New(req.Trailers))
+	ss.SetTrailer(MetadataNew(req.Trailers))
 	if req.Code != 0 {
 		return statusFromRequest(req)
 	}
@@ -125,7 +125,7 @@ func (s *TestServer) BidiStream(str TestService_BidiStreamServer) error {
 			time.Sleep(time.Millisecond * time.Duration(req.DelayMillis))
 		}
 		if count == 0 {
-			if err := str.SetHeader(metadata.New(req.Headers)); err != nil {
+			if err := str.SetHeader(MetadataNew(req.Headers)); err != nil {
 				return err
 			}
 			isHalfDuplex = req.Count < 0
@@ -156,7 +156,7 @@ func (s *TestServer) BidiStream(str TestService_BidiStreamServer) error {
 		}
 	}
 	if req != nil {
-		str.SetTrailer(metadata.New(req.Trailers))
+		str.SetTrailer(MetadataNew(req.Trailers))
 		if req.Code != 0 {
 			return statusFromRequest(req)
 		}
@@ -169,13 +169,13 @@ func (s *TestServer) UseExternalMessageTwice(ctx context.Context, in *empty.Empt
 	return &empty.Empty{}, nil
 }
 
-func asMap(md metadata.MD) map[string]string {
-	m := map[string]string{}
+func asMap(md metadata.MD) map[string][]byte {
+	m := map[string][]byte{}
 	for k, vs := range md {
 		if len(vs) == 0 {
 			continue
 		}
-		m[k] = vs[len(vs)-1]
+		m[k] = []byte(vs[len(vs)-1])
 	}
 	return m
 }

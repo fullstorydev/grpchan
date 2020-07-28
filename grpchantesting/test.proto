@@ -20,7 +20,7 @@ message Message {
 	int32 count = 2;
 	int32 code = 3;
 	int32 delay_millis = 4;
-	map<string, string> headers = 5;
-	map<string, string> trailers = 6;
+	map<string, bytes> headers = 5;
+	map<string, bytes> trailers = 6;
 	repeated google.protobuf.Any error_details = 7;
 }
