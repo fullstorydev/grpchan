@@ -32,7 +32,7 @@ func TestInterceptClientConnUnary(t *testing.T) {
 			return nil
 		}, nil)
 
-	cli := grpchantesting.NewTestServiceChannelClient(intercepted)
+	cli := grpchantesting.NewTestServiceClient(intercepted)
 
 	// success
 	tc.resp = &grpchantesting.Message{Count: 123}
@@ -104,7 +104,7 @@ func TestInterceptClientConnStream(t *testing.T) {
 			}, nil
 		})
 
-	cli := grpchantesting.NewTestServiceChannelClient(intercepted)
+	cli := grpchantesting.NewTestServiceClient(intercepted)
 
 	// client stream, success
 	tc.resp = &grpchantesting.Message{Count: 123}

@@ -28,7 +28,7 @@ import (
 // The test cases will be defined as child tests by invoking t.Run on the given
 // *testing.T.
 func RunChannelTestCases(t *testing.T, ch grpc.ClientConnInterface, supportsFullDuplex bool) {
-	cli := NewTestServiceChannelClient(ch)
+	cli := NewTestServiceClient(ch)
 	t.Run("unary", func(t *testing.T) { testUnary(t, cli) })
 	t.Run("client-stream", func(t *testing.T) { testClientStream(t, cli) })
 	t.Run("server-stream", func(t *testing.T) { testServerStream(t, cli) })

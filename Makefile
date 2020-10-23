@@ -25,6 +25,12 @@ checkgofmt:
 		exit 1; \
 	fi
 
+.PHONY: generate
+generate:
+	@go install ./cmd/protoc-gen-grpchan
+	@go install github.com/golang/protobuf/protoc-gen-go
+	go generate ./...
+
 .PHONY: vet
 vet:
 	go vet ./...
