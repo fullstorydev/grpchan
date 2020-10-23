@@ -8,6 +8,7 @@
 package inprocgrpc
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"reflect"
@@ -15,7 +16,6 @@ import (
 	"strings"
 	"sync"
 
-	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
@@ -127,7 +127,7 @@ type Channel struct {
 	cloner            Cloner
 }
 
-var _ grpchan.Channel = (*Channel)(nil)
+var _ grpc.ClientConnInterface = (*Channel)(nil)
 var _ grpchan.ServiceRegistry = (*Channel)(nil)
 
 // RegisterService registers the given service and implementation. Like a normal
@@ -418,7 +418,7 @@ type noValuesContext struct {
 	context.Context
 }
 
-func (ctx noValuesContext) Value(key interface{}) interface{} {
+func (ctx noValuesContext) Value(_ interface{}) interface{} {
 	return nil
 }
 

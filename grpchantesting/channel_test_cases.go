@@ -2,6 +2,7 @@ package grpchantesting
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"strings"
 	"testing"
@@ -11,13 +12,10 @@ import (
 	"github.com/golang/protobuf/ptypes"
 	"github.com/golang/protobuf/ptypes/any"
 	"github.com/golang/protobuf/ptypes/struct"
-	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
-
-	"github.com/fullstorydev/grpchan"
 )
 
 // RunChannelTestCases runs numerous test cases to exercise the behavior of the
@@ -29,7 +27,7 @@ import (
 //
 // The test cases will be defined as child tests by invoking t.Run on the given
 // *testing.T.
-func RunChannelTestCases(t *testing.T, ch grpchan.Channel, supportsFullDuplex bool) {
+func RunChannelTestCases(t *testing.T, ch grpc.ClientConnInterface, supportsFullDuplex bool) {
 	cli := NewTestServiceChannelClient(ch)
 	t.Run("unary", func(t *testing.T) { testUnary(t, cli) })
 	t.Run("client-stream", func(t *testing.T) { testClientStream(t, cli) })

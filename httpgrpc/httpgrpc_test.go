@@ -1,14 +1,13 @@
 package httpgrpc_test
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/url"
 	"testing"
-
-	"golang.org/x/net/context"
 
 	"github.com/fullstorydev/grpchan"
 	"github.com/fullstorydev/grpchan/grpchantesting"

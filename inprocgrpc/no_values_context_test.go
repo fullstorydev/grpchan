@@ -1,9 +1,8 @@
 package inprocgrpc
 
 import (
+	"context"
 	"testing"
-
-	"golang.org/x/net/context"
 )
 
 func TestNoValuesContext(t *testing.T) {

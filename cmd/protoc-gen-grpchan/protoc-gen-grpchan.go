@@ -38,7 +38,7 @@ func doCodeGen(req *plugins.CodeGenRequest, resp *plugins.CodeGenResponse) error
 		}
 	}
 	for _, fd := range req.Files {
-		if err := generateChanStubs(fd, &names, resp); err != nil {
+		if err := generateChanStubs(fd, &names, resp, args); err != nil {
 			if fe, ok := err.(*gopoet.FormatError); ok {
 				if args.debug {
 					return fmt.Errorf("%s: error in generated Go code: %v:\n%s", fd.GetName(), err, fe.Unformatted)
@@ -54,11 +54,11 @@ func doCodeGen(req *plugins.CodeGenRequest, resp *plugins.CodeGenResponse) error
 }
 
 var typeOfRegistry = gopoet.NamedType(gopoet.NewSymbol("github.com/fullstorydev/grpchan", "ServiceRegistry"))
-var typeOfChannel = gopoet.NamedType(gopoet.NewSymbol("github.com/fullstorydev/grpchan", "Channel"))
+var typeOfClientConn = gopoet.NamedType(gopoet.NewSymbol("google.golang.org/grpc", "ClientConnInterface"))
 var typeOfContext = gopoet.NamedType(gopoet.NewSymbol("golang.org/x/net/context", "Context"))
 var typeOfCallOptions = gopoet.SliceType(gopoet.NamedType(gopoet.NewSymbol("google.golang.org/grpc", "CallOption")))
 
-func generateChanStubs(fd *desc.FileDescriptor, names *plugins.GoNames, resp *plugins.CodeGenResponse) error {
+func generateChanStubs(fd *desc.FileDescriptor, names *plugins.GoNames, resp *plugins.CodeGenResponse, args codeGenArgs) error {
 	if len(fd.GetServices()) == 0 {
 		return nil
 	}
@@ -79,13 +79,18 @@ func generateChanStubs(fd *desc.FileDescriptor, names *plugins.GoNames, resp *pl
 			AddArg("srv", names.GoTypeForServiceServer(sd)).
 			Printlnf("reg.RegisterService(&%s, srv)", names.GoNameOfServiceDesc(sd)))
 
+		if !args.legacyStubs {
+			continue
+		}
+
 		cc := gopoet.NewStructTypeSpec(fmt.Sprintf("%sChannelClient", lowerSvcName),
-			gopoet.NewField("ch", typeOfChannel))
+			gopoet.NewField("ch", typeOfClientConn))
 		f.AddType(cc)
 
 		f.AddElement(gopoet.NewFunc(fmt.Sprintf("New%sChannelClient", svcName)).
-			AddArg("ch", typeOfChannel).
+			AddArg("ch", typeOfClientConn).
 			AddResult("", names.GoTypeForServiceClient(sd)).
+			SetComment(fmt.Sprintf("Deprecated: Use New%sClient instead.", svcName)).
 			Printlnf("return &%s{ch: ch}", cc))
 
 		streamCount := 0
@@ -182,9 +187,10 @@ func (t templates) makeTemplate(templateText string) *template.Template {
 }
 
 type codeGenArgs struct {
-	debug      bool
-	importPath string
-	importMap  map[string]string
+	debug       bool
+	legacyStubs bool
+	importPath  string
+	importMap   map[string]string
 }
 
 func parseArgs(args []string) (codeGenArgs, error) {
@@ -193,19 +199,18 @@ func parseArgs(args []string) (codeGenArgs, error) {
 		vals := strings.SplitN(arg, "=", 2)
 		switch vals[0] {
 		case "debug":
-			if len(vals) == 1 {
-				// if no value, assume "true"
-				result.debug = true
-				break
+			val, err := boolVal(vals)
+			if err != nil {
+				return result, err
 			}
-			switch strings.ToLower(vals[1]) {
-			case "true", "on", "yes", "1":
-				result.debug = true
-			case "false", "off", "no", "0":
-				result.debug = false
-			default:
-				return result, fmt.Errorf("invalid boolean arg for option 'debug': %s", vals[1])
+			result.debug = val
+
+		case "legacy_stubs":
+			val, err := boolVal(vals)
+			if err != nil {
+				return result, err
 			}
+			result.legacyStubs = val
 
 		case "import_path":
 			if len(vals) == 1 {
@@ -229,4 +234,19 @@ func parseArgs(args []string) (codeGenArgs, error) {
 		}
 	}
 	return result, nil
+}
+
+func boolVal(vals []string) (bool, error) {
+	if len(vals) == 1 {
+		// if no value, assume "true"
+		return true, nil
+	}
+	switch strings.ToLower(vals[1]) {
+	case "true", "on", "yes", "1":
+		return true, nil
+	case "false", "off", "no", "0":
+		return false, nil
+	default:
+		return false, fmt.Errorf("invalid boolean arg for option '%s': %s", vals[0], vals[1])
+	}
 }

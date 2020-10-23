@@ -2,6 +2,7 @@ package inprocgrpc_test
 
 import (
 	"bytes"
+	"context"
 	"reflect"
 	"runtime"
 	"testing"
@@ -12,7 +13,6 @@ import (
 	"github.com/jhump/protoreflect/desc"
 	"github.com/jhump/protoreflect/dynamic"
 	"github.com/jhump/protoreflect/dynamic/grpcdynamic"
-	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 )
