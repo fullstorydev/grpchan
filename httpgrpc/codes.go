@@ -6,7 +6,7 @@ import (
 	"google.golang.org/grpc/codes"
 )
 
-// HttpStatusFromCode translates the given GRPC code into an HTTP
+// httpStatusFromCode translates the given GRPC code into an HTTP
 // response. This is used to set the HTTP status code for unary RPCs.
 // (Streaming RPCs cannot convey a GRPC status code until the stream
 // completes, so they use a 200 HTTP status code and then encode the
@@ -17,13 +17,13 @@ func httpStatusFromCode(code codes.Code) int {
 	case codes.OK:
 		return http.StatusOK
 	case codes.Canceled:
-		return 499
+		return http.StatusBadGateway
 	case codes.Unknown:
 		return http.StatusInternalServerError
 	case codes.InvalidArgument:
 		return http.StatusBadRequest
 	case codes.DeadlineExceeded:
-		return 499
+		return http.StatusGatewayTimeout
 	case codes.NotFound:
 		return http.StatusNotFound
 	case codes.AlreadyExists:
