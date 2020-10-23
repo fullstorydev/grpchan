@@ -60,7 +60,7 @@ func ErrorRenderer(errFunc func(context.Context, *status.Status, http.Header) (h
 
 // DefaultErrorRenderer translates the gRPC code in the given status to an HTTP
 // status code. The following table shows how status codes are translated:
-//   Canceled:           499 Client Closed Request
+//   Canceled:         * 502 Bad Gateway
 //   Unknown:            500 Internal Server Error
 //   InvalidArgument:    400 Bad Request
 //   DeadlineExceeded: * 504 Gateway Timeout
@@ -77,10 +77,10 @@ func ErrorRenderer(errFunc func(context.Context, *status.Status, http.Header) (h
 //   Unavailable:        503 Service Unavailable
 //   DataLoss:           500 Internal Server Error
 //
-//   * If the gRPC status indicates DeadlineExceeded and the
-//     given request context ALSO indicates a context error
-//     (meaning that the request was cancelled by the client),
-//     then a 499 Client Closed Request status is used instead.
+//   * If the gRPC status indicates Canceled or DeadlineExceeded
+//     and the given request context ALSO indicates a context error
+//     (meaning that the request was cancelled by the client), then
+//     a 499 Client Closed Request code is used instead.
 //
 // If any other gRPC status code is observed, it would get translated into a
 // 500 Internal Server Error.
@@ -88,7 +88,7 @@ func ErrorRenderer(errFunc func(context.Context, *status.Status, http.Header) (h
 // Note that OK is absent from the mapping because the error renderer will never
 // be called for a non-error status.
 func DefaultErrorRenderer(ctx context.Context, st *status.Status, _ http.Header) (httpCode int) {
-	if st.Code() == codes.DeadlineExceeded && ctx.Err() != nil {
+	if (st.Code() == codes.Canceled || st.Code() == codes.DeadlineExceeded) && ctx.Err() != nil {
 		return 499
 	}
 	return httpStatusFromCode(st.Code())

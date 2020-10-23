@@ -17,7 +17,7 @@ func httpStatusFromCode(code codes.Code) int {
 	case codes.OK:
 		return http.StatusOK
 	case codes.Canceled:
-		return 499
+		return http.StatusBadGateway
 	case codes.Unknown:
 		return http.StatusInternalServerError
 	case codes.InvalidArgument:
