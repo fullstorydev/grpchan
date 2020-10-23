@@ -52,7 +52,7 @@ type handlerOpts struct {
 // the HTTP status code to use.
 //
 // If no such option is used the handler will use DefaultErrorRenderer.
-func ErrorRenderer(errFunc func(context.Context, *status.Status, http.Header) (httpCode int)) HandlerOption {
+func ErrorRenderer(errFunc func(reqCtx context.Context, st *status.Status, rspHdr http.Header) (httpCode int)) HandlerOption {
 	return func(h *handlerOpts) {
 		h.errFunc = errFunc
 	}
