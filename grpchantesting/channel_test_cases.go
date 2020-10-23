@@ -129,7 +129,8 @@ func testUnary(t *testing.T, cli TestServiceClient) {
 	t.Run("timeout", func(t *testing.T) {
 		req := reqPrototype
 		req.DelayMillis = 500
-		tctx, _ := context.WithTimeout(ctx, 100*time.Millisecond)
+		tctx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
+		defer cancel()
 		_, err := cli.Unary(tctx, &req)
 		checkError(t, err, codes.DeadlineExceeded)
 	})
@@ -211,7 +212,8 @@ func testClientStream(t *testing.T, cli TestServiceClient) {
 
 	t.Run("timeout", func(t *testing.T) {
 		req := reqPrototype
-		tctx, _ := context.WithTimeout(ctx, 100*time.Millisecond)
+		tctx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
+		defer cancel()
 		cs, err := cli.ClientStream(tctx)
 		if err != nil {
 			t.Fatalf("RPC failed: %v", err)
@@ -318,7 +320,8 @@ func testServerStream(t *testing.T, cli TestServiceClient) {
 
 	t.Run("timeout", func(t *testing.T) {
 		req := reqPrototype
-		tctx, _ := context.WithTimeout(ctx, 100*time.Millisecond)
+		tctx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
+		defer cancel()
 
 		req.Code = int32(codes.OK)
 		req.DelayMillis = 500
@@ -466,7 +469,8 @@ func testHalfDuplexBidiStream(t *testing.T, cli TestServiceClient) {
 
 	t.Run("timeout", func(t *testing.T) {
 		req := reqPrototype
-		tctx, _ := context.WithTimeout(ctx, 100*time.Millisecond)
+		tctx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
+		defer cancel()
 		bidi, err := cli.BidiStream(tctx)
 		if err != nil {
 			t.Fatalf("RPC failed: %v", err)
@@ -607,7 +611,8 @@ func testFullDuplexBidiStream(t *testing.T, cli TestServiceClient) {
 
 	t.Run("timeout", func(t *testing.T) {
 		req := reqPrototype
-		tctx, _ := context.WithTimeout(ctx, 100*time.Millisecond)
+		tctx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
+		defer cancel()
 		bidi, err := cli.BidiStream(tctx)
 		if err != nil {
 			t.Fatalf("RPC failed: %v", err)

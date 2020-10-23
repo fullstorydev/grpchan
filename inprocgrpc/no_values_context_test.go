@@ -5,6 +5,8 @@ import (
 	"testing"
 )
 
+//lint:file-ignore SA1029 context values are just for tests
+
 func TestNoValuesContext(t *testing.T) {
 	ctx := context.WithValue(context.Background(), "abc", "def")
 	ctx = context.WithValue(ctx, "xyz", "123")

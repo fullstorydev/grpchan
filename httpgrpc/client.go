@@ -134,6 +134,7 @@ func (ch *Channel) NewStream(ctx context.Context, desc *grpc.StreamDesc, methodN
 	r, w := io.Pipe()
 	req, err := http.NewRequest("POST", reqUrlStr, r)
 	if err != nil {
+		cancel()
 		return nil, err
 	}
 	req.Header = h

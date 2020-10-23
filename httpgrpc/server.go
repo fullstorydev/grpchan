@@ -156,11 +156,12 @@ func handleMethod(svr interface{}, serviceName string, desc *grpc.MethodDesc, un
 			return
 		}
 
-		ctx, err := contextFromHeaders(ctx, r.Header)
+		ctx, cancel, err := contextFromHeaders(ctx, r.Header)
 		if err != nil {
 			writeError(w, http.StatusBadRequest)
 			return
 		}
+		defer cancel()
 
 		req, err := ioutil.ReadAll(r.Body)
 		if err != nil {
@@ -248,11 +249,12 @@ func handleStream(svr interface{}, serviceName string, desc *grpc.StreamDesc, st
 			return
 		}
 
-		ctx, err := contextFromHeaders(ctx, r.Header)
+		ctx, cancel, err := contextFromHeaders(ctx, r.Header)
 		if err != nil {
 			writeError(w, http.StatusBadRequest)
 			return
 		}
+		defer cancel()
 
 		w.Header().Set("Content-Type", StreamRpcContentType_V1)
 
@@ -450,10 +452,11 @@ func (s *serverStream) RecvMsg(m interface{}) error {
 // using the given headers. The headers are converted to incoming metadata that
 // can be retrieved via metadata.FromIncomingContext. If the headers contain a
 // GRPC timeout, that is used to create a timeout for the returned context.
-func contextFromHeaders(parent context.Context, h http.Header) (context.Context, error) {
+func contextFromHeaders(parent context.Context, h http.Header) (context.Context, context.CancelFunc, error) {
+	cancel := func() {} // default to no-op
 	md, err := asMetadata(h)
 	if err != nil {
-		return nil, err
+		return parent, cancel, err
 	}
 	ctx := metadata.NewIncomingContext(parent, md)
 
@@ -479,9 +482,9 @@ func contextFromHeaders(parent context.Context, h http.Header) (context.Context,
 				unit = time.Nanosecond
 			}
 			if unit != 0 {
-				ctx, _ = context.WithTimeout(ctx, time.Duration(timeoutVal)*unit)
+				ctx, cancel = context.WithTimeout(ctx, time.Duration(timeoutVal)*unit)
 			}
 		}
 	}
-	return ctx, nil
+	return ctx, cancel, nil
 }
