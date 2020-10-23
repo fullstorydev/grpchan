@@ -39,7 +39,7 @@ type Mux func(pattern string, handler func(http.ResponseWriter, *http.Request))
 type HandlerOption func(*handlerOpts)
 
 type handlerOpts struct {
-	errFunc func(*status.Status, http.Header) (httpCode int)
+	errFunc func(context.Context, *status.Status, http.Header) (httpCode int)
 }
 
 // ErrorRenderer returns a HandlerOption that will cause the handler to use the
@@ -48,10 +48,11 @@ type handlerOpts struct {
 // HTTP body) instead.
 //
 // The function can examine and add response header values via the supplied
-// http.Header. It must then return the HTTP status code to use.
+// http.Header. It can also examine the request context. It must then return
+// the HTTP status code to use.
 //
 // If no such option is used the handler will use DefaultErrorRenderer.
-func ErrorRenderer(errFunc func(*status.Status, http.Header) (httpCode int)) HandlerOption {
+func ErrorRenderer(errFunc func(context.Context, *status.Status, http.Header) (httpCode int)) HandlerOption {
 	return func(h *handlerOpts) {
 		h.errFunc = errFunc
 	}
@@ -62,7 +63,7 @@ func ErrorRenderer(errFunc func(*status.Status, http.Header) (httpCode int)) Han
 //   Canceled:           499 Client Closed Request
 //   Unknown:            500 Internal Server Error
 //   InvalidArgument:    400 Bad Request
-//   DeadlineExceeded:   499 Client Closed Request
+//   DeadlineExceeded: * 504 Gateway Timeout
 //   NotFound:           404 Not Found
 //   AlreadyExists:      409 Conflict
 //   PermissionDenied:   403 Forbidden
@@ -75,12 +76,21 @@ func ErrorRenderer(errFunc func(*status.Status, http.Header) (httpCode int)) Han
 //   Internal:           500 Internal Server Error
 //   Unavailable:        503 Service Unavailable
 //   DataLoss:           500 Internal Server Error
+//
+//   * If the gRPC status indicates DeadlineExceeded and the
+//     given request context ALSO indicates a context error
+//     (meaning that the request was cancelled by the client),
+//     then a 499 Client Closed Request status is used instead.
+//
 // If any other gRPC status code is observed, it would get translated into a
 // 500 Internal Server Error.
 //
 // Note that OK is absent from the mapping because the error renderer will never
 // be called for a non-error status.
-func DefaultErrorRenderer(st *status.Status, _ http.Header) (httpCode int) {
+func DefaultErrorRenderer(ctx context.Context, st *status.Status, _ http.Header) (httpCode int) {
+	if st.Code() == codes.DeadlineExceeded && ctx.Err() != nil {
+		return 499
+	}
 	return httpStatusFromCode(st.Code())
 }
 
@@ -184,7 +194,7 @@ func handleMethod(svr interface{}, serviceName string, desc *grpc.MethodDesc, un
 				str := base64.RawURLEncoding.EncodeToString(b)
 				w.Header().Add(grpcDetailsHeader, str)
 			}
-			httpStatus := errHandler(st, w.Header())
+			httpStatus := errHandler(r.Context(), st, w.Header())
 			writeError(w, httpStatus)
 			return
 		}
