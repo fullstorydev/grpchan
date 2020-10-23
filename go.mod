@@ -9,6 +9,7 @@ require (
 	github.com/jhump/goprotoc v0.2.0
 	github.com/jhump/protoreflect v1.5.0
 	github.com/nishanths/predeclared v0.0.0-20200524104333-86fad755b4d3 // indirect
+	golang.org/x/lint v0.0.0-20190313153728-d0100b6bd8b3 // indirect
 	golang.org/x/net v0.0.0-20200226121028-0de0cce0169b
 	google.golang.org/genproto v0.0.0-20190819201941-24fa4b261c55
 	google.golang.org/grpc v1.30.0
