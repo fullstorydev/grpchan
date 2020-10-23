@@ -34,21 +34,76 @@ import (
 // (for example, adding authentication checks, logging, error handling, etc).
 type Mux func(pattern string, handler func(http.ResponseWriter, *http.Request))
 
+// HandlerOption is an option to customize some aspect of the HTTP handler
+// behavior, such as rendering gRPC errors to HTTP responses.
+type HandlerOption func(*handlerOpts)
+
+type handlerOpts struct {
+	errFunc func(*status.Status, http.Header) (httpCode int)
+}
+
+// ErrorRenderer returns a HandlerOption that will cause the handler to use the
+// given function to render an error.  It is only used for unary RPCs since
+// streaming RPCs serialize a status message to the response trailer (in the
+// HTTP body) instead.
+//
+// The function can examine and add response header values via the supplied
+// http.Header. It must then return the HTTP status code to use.
+//
+// If no such option is used the handler will use DefaultErrorRenderer.
+func ErrorRenderer(errFunc func(*status.Status, http.Header) (httpCode int)) HandlerOption {
+	return func(h *handlerOpts) {
+		h.errFunc = errFunc
+	}
+}
+
+// DefaultErrorRenderer translates the gRPC code in the given status to an HTTP
+// status code. The following table shows how status codes are translated:
+//   Canceled:           499 Client Closed Request
+//   Unknown:            500 Internal Server Error
+//   InvalidArgument:    400 Bad Request
+//   DeadlineExceeded:   499 Client Closed Request
+//   NotFound:           404 Not Found
+//   AlreadyExists:      409 Conflict
+//   PermissionDenied:   403 Forbidden
+//   Unauthenticated:    401 Unauthorized
+//   ResourceExhausted:  429 Too Many Requests
+//   FailedPrecondition: 412 Precondition Failed
+//   Aborted:            409 Conflict
+//   OutOfRange:         422 Unprocessable Entity
+//   Unimplemented:      501 Not Implemented
+//   Internal:           500 Internal Server Error
+//   Unavailable:        503 Service Unavailable
+//   DataLoss:           500 Internal Server Error
+// If any other gRPC status code is observed, it would get translated into a
+// 500 Internal Server Error.
+//
+// Note that OK is absent from the mapping because the error renderer will never
+// be called for a non-error status.
+func DefaultErrorRenderer(st *status.Status, _ http.Header) (httpCode int) {
+	return httpStatusFromCode(st.Code())
+}
+
 // HandleServices uses the given mux to register handlers for all methods
 // exposed by handlers registered in reg. They are registered using a path of
 // "basePath/name.of.Service/Method". If non-nil interceptor(s) are provided
 // then they will be used to intercept applicable RPCs before dispatch to the
 // registered handler.
-func HandleServices(mux Mux, basePath string, reg grpchan.HandlerMap, unaryInt grpc.UnaryServerInterceptor, streamInt grpc.StreamServerInterceptor) {
+func HandleServices(mux Mux, basePath string, reg grpchan.HandlerMap, unaryInt grpc.UnaryServerInterceptor, streamInt grpc.StreamServerInterceptor, opts ...HandlerOption) {
+	var hOpts handlerOpts
+	for _, opt := range opts {
+		opt(&hOpts)
+	}
+
 	reg.ForEach(func(desc *grpc.ServiceDesc, svr interface{}) {
 		for i := range desc.Methods {
 			md := desc.Methods[i]
-			h := HandleMethod(svr, desc.ServiceName, &md, unaryInt)
+			h := handleMethod(svr, desc.ServiceName, &md, unaryInt, &hOpts)
 			mux(path.Join(basePath, fmt.Sprintf("%s/%s", desc.ServiceName, md.MethodName)), h)
 		}
 		for i := range desc.Streams {
 			sd := desc.Streams[i]
-			h := HandleStream(svr, desc.ServiceName, &sd, streamInt)
+			h := handleStream(svr, desc.ServiceName, &sd, streamInt, &hOpts)
 			mux(path.Join(basePath, fmt.Sprintf("%s/%s", desc.ServiceName, sd.StreamName)), h)
 		}
 	})
@@ -56,7 +111,19 @@ func HandleServices(mux Mux, basePath string, reg grpchan.HandlerMap, unaryInt g
 
 // HandleMethod returns an HTTP handler that will handle a unary RPC method
 // by dispatching the given method on the given server.
-func HandleMethod(svr interface{}, serviceName string, desc *grpc.MethodDesc, unaryInt grpc.UnaryServerInterceptor) http.HandlerFunc {
+func HandleMethod(svr interface{}, serviceName string, desc *grpc.MethodDesc, unaryInt grpc.UnaryServerInterceptor, opts ...HandlerOption) http.HandlerFunc {
+	var hOpts handlerOpts
+	for _, opt := range opts {
+		opt(&hOpts)
+	}
+	return handleMethod(svr, serviceName, desc, unaryInt, &hOpts)
+}
+
+func handleMethod(svr interface{}, serviceName string, desc *grpc.MethodDesc, unaryInt grpc.UnaryServerInterceptor, opts *handlerOpts) http.HandlerFunc {
+	errHandler := opts.errFunc
+	if errHandler == nil {
+		errHandler = DefaultErrorRenderer
+	}
 	fullMethod := fmt.Sprintf("/%s/%s", serviceName, desc.MethodName)
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
@@ -101,7 +168,11 @@ func HandleMethod(svr interface{}, serviceName string, desc *grpc.MethodDesc, un
 		if err != nil {
 			st, _ := status.FromError(err)
 			if st.Code() == codes.OK {
-				st = status.New(codes.Internal, err.Error())
+				// preserve all error details, but rewrite the code since we don't want
+				// to send back a non-error status when we know an error occured
+				stpb := st.Proto()
+				stpb.Code = int32(codes.Internal)
+				st = status.FromProto(stpb)
 			}
 			statProto := st.Proto()
 			w.Header().Set("X-GRPC-Status", fmt.Sprintf("%d:%s", statProto.Code, statProto.Message))
@@ -113,7 +184,7 @@ func HandleMethod(svr interface{}, serviceName string, desc *grpc.MethodDesc, un
 				str := base64.RawURLEncoding.EncodeToString(b)
 				w.Header().Add(grpcDetailsHeader, str)
 			}
-			httpStatus := httpStatusFromCode(st.Code())
+			httpStatus := errHandler(st, w.Header())
 			writeError(w, httpStatus)
 			return
 		}
@@ -132,7 +203,15 @@ func HandleMethod(svr interface{}, serviceName string, desc *grpc.MethodDesc, un
 
 // HandleStream returns an HTTP handler that will handle a streaming RPC method
 // by dispatching the given method on the given server.
-func HandleStream(svr interface{}, serviceName string, desc *grpc.StreamDesc, streamInt grpc.StreamServerInterceptor) http.HandlerFunc {
+func HandleStream(svr interface{}, serviceName string, desc *grpc.StreamDesc, streamInt grpc.StreamServerInterceptor, opts ...HandlerOption) http.HandlerFunc {
+	var hOpts handlerOpts
+	for _, opt := range opts {
+		opt(&hOpts)
+	}
+	return handleStream(svr, serviceName, desc, streamInt, &hOpts)
+}
+
+func handleStream(svr interface{}, serviceName string, desc *grpc.StreamDesc, streamInt grpc.StreamServerInterceptor, opts *handlerOpts) http.HandlerFunc {
 	info := &grpc.StreamServerInfo{
 		FullMethod:     fmt.Sprintf("/%s/%s", serviceName, desc.StreamName),
 		IsClientStream: desc.ClientStreams,
@@ -181,23 +260,23 @@ func HandleStream(svr interface{}, serviceName string, desc *grpc.StreamDesc, st
 		}
 
 		tr := HttpTrailer{
+			Code:     int32(codes.OK),
+			Message:  codes.OK.String(),
 			Metadata: asTrailerProto(metadata.Join(str.tr...)),
 		}
-		if st, _ := status.FromError(err); st.Code() != codes.OK {
+		if err != nil {
+			st, _ := status.FromError(err)
+			if st.Code() == codes.OK {
+				// preserve all error details, but rewrite the code since we don't want
+				// to send back a non-error status when we know an error occured
+				stpb := st.Proto()
+				stpb.Code = int32(codes.Internal)
+				st = status.FromProto(stpb)
+			}
 			statProto := st.Proto()
 			tr.Code = statProto.Code
 			tr.Message = statProto.Message
 			tr.Details = statProto.Details
-		} else if err != nil {
-			tr.Code = int32(codes.Internal)
-			tr.Message = "Internal Server Error"
-		}
-
-		// must put something the trailing message so it's size is non-zero
-		// (otherwise, it's envelope cannot indicate a negative number, and
-		// it will be confused for a normal response message)
-		if tr.Message == "" {
-			tr.Message = codes.Code(tr.Code).String()
 		}
 
 		writeProtoMessage(w, &tr, true)
