@@ -1,15 +1,34 @@
 package grpchan
 
 import (
+	"context"
 	"fmt"
 
-	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 )
 
+// WrappedClientConn is a channel that wraps another. It provides an Unwrap method
+// for access the underlying wrapped implementation.
+type WrappedClientConn interface {
+	grpc.ClientConnInterface
+	Unwrap() grpc.ClientConnInterface
+}
+
 // InterceptChannel returns a new channel that intercepts RPCs with the given
-// interceptors. If both given interceptors are nil, returns ch.
-func InterceptChannel(ch Channel, unaryInt grpc.UnaryClientInterceptor, streamInt grpc.StreamClientInterceptor) Channel {
+// interceptors. If both given interceptors are nil, returns ch. Otherwise, the
+// returned value will implement WrappedClientConn and its Unwrap() method will
+// return ch.
+//
+// Deprecated: Use InterceptClientConn instead.
+func InterceptChannel(ch grpc.ClientConnInterface, unaryInt grpc.UnaryClientInterceptor, streamInt grpc.StreamClientInterceptor) grpc.ClientConnInterface {
+	return InterceptClientConn(ch, unaryInt, streamInt)
+}
+
+// InterceptClientConn returns a new channel that intercepts RPCs with the given
+// interceptors. If both given interceptors are nil, returns ch. Otherwise, the
+// returned value will implement WrappedClientConn and its Unwrap() method will
+// return ch.
+func InterceptClientConn(ch grpc.ClientConnInterface, unaryInt grpc.UnaryClientInterceptor, streamInt grpc.StreamClientInterceptor) grpc.ClientConnInterface {
 	if unaryInt == nil && streamInt == nil {
 		return ch
 	}
@@ -17,16 +36,31 @@ func InterceptChannel(ch Channel, unaryInt grpc.UnaryClientInterceptor, streamIn
 }
 
 type interceptedChannel struct {
-	ch        Channel
+	ch        grpc.ClientConnInterface
 	unaryInt  grpc.UnaryClientInterceptor
 	streamInt grpc.StreamClientInterceptor
+}
+
+func (intch *interceptedChannel) Unwrap() grpc.ClientConnInterface {
+	return intch.ch
+}
+
+func unwrap(ch grpc.ClientConnInterface) grpc.ClientConnInterface {
+	// completely unwrap to find the root ClientConn
+	for {
+		w, ok := ch.(WrappedClientConn)
+		if !ok {
+			return ch
+		}
+		ch = w
+	}
 }
 
 func (intch *interceptedChannel) Invoke(ctx context.Context, methodName string, req, resp interface{}, opts ...grpc.CallOption) error {
 	if intch.unaryInt == nil {
 		return intch.ch.Invoke(ctx, methodName, req, resp, opts...)
 	}
-	cc, _ := intch.ch.(*grpc.ClientConn)
+	cc, _ := unwrap(intch.ch).(*grpc.ClientConn)
 	return intch.unaryInt(ctx, methodName, req, resp, cc, intch.unaryInvoker, opts...)
 }
 

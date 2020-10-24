@@ -2,6 +2,7 @@ package inprocgrpc_test
 
 import (
 	"bytes"
+	"context"
 	"reflect"
 	"runtime"
 	"testing"
@@ -12,7 +13,6 @@ import (
 	"github.com/jhump/protoreflect/desc"
 	"github.com/jhump/protoreflect/dynamic"
 	"github.com/jhump/protoreflect/dynamic/grpcdynamic"
-	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 )
@@ -51,7 +51,7 @@ func TestUseDynamicMessage(t *testing.T) {
 	grpchantesting.RegisterHandlerTestService(&cc, svr)
 	stub := grpcdynamic.NewStub(&cc)
 
-	fd, err := desc.LoadFileDescriptor("github.com/fullstorydev/grpchan/grpchantesting/test.proto")
+	fd, err := desc.LoadFileDescriptor("grpchantesting/test.proto")
 	if err != nil {
 		t.Fatalf("failed to load descriptor for test.proto: %v", err)
 	}

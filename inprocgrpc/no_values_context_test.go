@@ -1,10 +1,11 @@
 package inprocgrpc
 
 import (
+	"context"
 	"testing"
-
-	"golang.org/x/net/context"
 )
+
+//lint:file-ignore SA1029 context values are just for tests
 
 func TestNoValuesContext(t *testing.T) {
 	ctx := context.WithValue(context.Background(), "abc", "def")

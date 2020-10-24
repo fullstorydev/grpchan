@@ -1,14 +1,13 @@
 package httpgrpc_test
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/url"
 	"testing"
-
-	"golang.org/x/net/context"
 
 	"github.com/fullstorydev/grpchan"
 	"github.com/fullstorydev/grpchan/grpchantesting"
@@ -46,7 +45,7 @@ func TestGrpcOverHttp(t *testing.T) {
 	t.Run("empty-trailer", func(t *testing.T) {
 		// test RPC w/ streaming response where trailer message is empty
 		// (e.g. no trailer metadata and code == 0 [OK])
-		cli := grpchantesting.NewTestServiceChannelClient(&cc)
+		cli := grpchantesting.NewTestServiceClient(&cc)
 		str, err := cli.ServerStream(context.Background(), &grpchantesting.Message{})
 		if err != nil {
 			t.Fatalf("failed to initiate server stream: %v", err)

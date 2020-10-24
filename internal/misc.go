@@ -1,12 +1,12 @@
 package internal
 
 import (
+	"context"
 	"fmt"
 	"reflect"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/jhump/protoreflect/dynamic"
-	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"

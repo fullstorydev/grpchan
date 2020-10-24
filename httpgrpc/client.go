@@ -2,6 +2,7 @@ package httpgrpc
 
 import (
 	"bytes"
+	"context"
 	"crypto/tls"
 	"encoding/base64"
 	"fmt"
@@ -19,7 +20,6 @@ import (
 
 	"github.com/golang/protobuf/proto"
 	"github.com/golang/protobuf/ptypes/any"
-	"golang.org/x/net/context"
 	spb "google.golang.org/genproto/googleapis/rpc/status"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -28,7 +28,6 @@ import (
 	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 
-	"github.com/fullstorydev/grpchan"
 	"github.com/fullstorydev/grpchan/internal"
 )
 
@@ -42,7 +41,7 @@ type Channel struct {
 	BaseURL   *url.URL
 }
 
-var _ grpchan.Channel = (*Channel)(nil)
+var _ grpc.ClientConnInterface = (*Channel)(nil)
 
 var grpcDetailsHeader = textproto.CanonicalMIMEHeaderKey("X-GRPC-Details")
 
@@ -135,6 +134,7 @@ func (ch *Channel) NewStream(ctx context.Context, desc *grpc.StreamDesc, methodN
 	r, w := io.Pipe()
 	req, err := http.NewRequest("POST", reqUrlStr, r)
 	if err != nil {
+		cancel()
 		return nil, err
 	}
 	req.Header = h

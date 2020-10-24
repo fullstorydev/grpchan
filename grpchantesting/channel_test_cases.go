@@ -2,6 +2,7 @@ package grpchantesting
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"strings"
 	"testing"
@@ -11,13 +12,10 @@ import (
 	"github.com/golang/protobuf/ptypes"
 	"github.com/golang/protobuf/ptypes/any"
 	"github.com/golang/protobuf/ptypes/struct"
-	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
-
-	"github.com/fullstorydev/grpchan"
 )
 
 // RunChannelTestCases runs numerous test cases to exercise the behavior of the
@@ -29,8 +27,8 @@ import (
 //
 // The test cases will be defined as child tests by invoking t.Run on the given
 // *testing.T.
-func RunChannelTestCases(t *testing.T, ch grpchan.Channel, supportsFullDuplex bool) {
-	cli := NewTestServiceChannelClient(ch)
+func RunChannelTestCases(t *testing.T, ch grpc.ClientConnInterface, supportsFullDuplex bool) {
+	cli := NewTestServiceClient(ch)
 	t.Run("unary", func(t *testing.T) { testUnary(t, cli) })
 	t.Run("client-stream", func(t *testing.T) { testClientStream(t, cli) })
 	t.Run("server-stream", func(t *testing.T) { testServerStream(t, cli) })
@@ -131,7 +129,8 @@ func testUnary(t *testing.T, cli TestServiceClient) {
 	t.Run("timeout", func(t *testing.T) {
 		req := reqPrototype
 		req.DelayMillis = 500
-		tctx, _ := context.WithTimeout(ctx, 100*time.Millisecond)
+		tctx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
+		defer cancel()
 		_, err := cli.Unary(tctx, &req)
 		checkError(t, err, codes.DeadlineExceeded)
 	})
@@ -213,7 +212,8 @@ func testClientStream(t *testing.T, cli TestServiceClient) {
 
 	t.Run("timeout", func(t *testing.T) {
 		req := reqPrototype
-		tctx, _ := context.WithTimeout(ctx, 100*time.Millisecond)
+		tctx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
+		defer cancel()
 		cs, err := cli.ClientStream(tctx)
 		if err != nil {
 			t.Fatalf("RPC failed: %v", err)
@@ -320,7 +320,8 @@ func testServerStream(t *testing.T, cli TestServiceClient) {
 
 	t.Run("timeout", func(t *testing.T) {
 		req := reqPrototype
-		tctx, _ := context.WithTimeout(ctx, 100*time.Millisecond)
+		tctx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
+		defer cancel()
 
 		req.Code = int32(codes.OK)
 		req.DelayMillis = 500
@@ -468,7 +469,8 @@ func testHalfDuplexBidiStream(t *testing.T, cli TestServiceClient) {
 
 	t.Run("timeout", func(t *testing.T) {
 		req := reqPrototype
-		tctx, _ := context.WithTimeout(ctx, 100*time.Millisecond)
+		tctx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
+		defer cancel()
 		bidi, err := cli.BidiStream(tctx)
 		if err != nil {
 			t.Fatalf("RPC failed: %v", err)
@@ -609,7 +611,8 @@ func testFullDuplexBidiStream(t *testing.T, cli TestServiceClient) {
 
 	t.Run("timeout", func(t *testing.T) {
 		req := reqPrototype
-		tctx, _ := context.WithTimeout(ctx, 100*time.Millisecond)
+		tctx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
+		defer cancel()
 		bidi, err := cli.BidiStream(tctx)
 		if err != nil {
 			t.Fatalf("RPC failed: %v", err)

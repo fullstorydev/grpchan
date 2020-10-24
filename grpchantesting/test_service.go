@@ -1,13 +1,13 @@
 package grpchantesting
 
-//go:generate protoc --go_out=plugins=grpc:. --grpchan_out=. test.proto
+//go:generate protoc --proto_path=../ --go_out=plugins=grpc:../ --grpchan_out=../ grpchantesting/test.proto
 
 import (
+	"context"
 	"io"
 	"time"
 
 	"github.com/golang/protobuf/ptypes/empty"
-	"golang.org/x/net/context"
 	spb "google.golang.org/genproto/googleapis/rpc/status"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
