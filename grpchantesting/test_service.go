@@ -1,6 +1,6 @@
 package grpchantesting
 
-//go:generate protoc --proto_path=../ --go_out=plugins=grpc:../ --grpchan_out=../ grpchantesting/test.proto
+//go:generate protoc --proto_path=../ --go_out=plugins=grpc:../ --grpchan_out=legacy_stubs:../ grpchantesting/test.proto
 
 import (
 	"context"
