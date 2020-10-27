@@ -39,7 +39,7 @@ type Mux func(pattern string, handler func(http.ResponseWriter, *http.Request))
 type HandlerOption func(*handlerOpts)
 
 type handlerOpts struct {
-	errFunc func(context.Context, *status.Status, http.Header) (httpCode int)
+	errFunc func(context.Context, *status.Status, http.ResponseWriter)
 }
 
 // ErrorRenderer returns a HandlerOption that will cause the handler to use the
@@ -47,19 +47,19 @@ type handlerOpts struct {
 // streaming RPCs serialize a status message to the response trailer (in the
 // HTTP body) instead.
 //
-// The function can examine and add response header values via the supplied
-// http.Header. It can also examine the request context. It must then return
-// the HTTP status code to use.
+// The function should call methods on response in order to write an error
+// response, including any response headers, the HTTP status code, and any
+// response body.
 //
-// If no such option is used the handler will use DefaultErrorRenderer.
-func ErrorRenderer(errFunc func(reqCtx context.Context, st *status.Status, rspHdr http.Header) (httpCode int)) HandlerOption {
+// If no such option is used, the handler will use DefaultErrorRenderer.
+func ErrorRenderer(errFunc func(reqCtx context.Context, st *status.Status, response http.ResponseWriter)) HandlerOption {
 	return func(h *handlerOpts) {
 		h.errFunc = errFunc
 	}
 }
 
 // DefaultErrorRenderer translates the gRPC code in the given status to an HTTP
-// status code. The following table shows how status codes are translated:
+// error response. The following table shows how status codes are translated:
 //   Canceled:         * 502 Bad Gateway
 //   Unknown:            500 Internal Server Error
 //   InvalidArgument:    400 Bad Request
@@ -87,11 +87,20 @@ func ErrorRenderer(errFunc func(reqCtx context.Context, st *status.Status, rspHd
 //
 // Note that OK is absent from the mapping because the error renderer will never
 // be called for a non-error status.
-func DefaultErrorRenderer(ctx context.Context, st *status.Status, _ http.Header) (httpCode int) {
+//
+// This function uses http.Error to render the computed code (and corresponding
+// status text) to the given ResponseWriter.
+func DefaultErrorRenderer(ctx context.Context, st *status.Status, w http.ResponseWriter) {
 	if (st.Code() == codes.Canceled || st.Code() == codes.DeadlineExceeded) && ctx.Err() != nil {
-		return 499
+		http.Error(w, "Client Closed Request", 499)
+		return
 	}
-	return httpStatusFromCode(st.Code())
+	code := httpStatusFromCode(st.Code())
+	msg := http.StatusText(code)
+	if msg == "" {
+		msg = st.Code().String()
+	}
+	http.Error(w, msg, code)
 }
 
 // HandleServices uses the given mux to register handlers for all methods
@@ -195,8 +204,7 @@ func handleMethod(svr interface{}, serviceName string, desc *grpc.MethodDesc, un
 				str := base64.RawURLEncoding.EncodeToString(b)
 				w.Header().Add(grpcDetailsHeader, str)
 			}
-			httpStatus := errHandler(r.Context(), st, w.Header())
-			writeError(w, httpStatus)
+			errHandler(r.Context(), st, w)
 			return
 		}
 
