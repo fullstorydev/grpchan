@@ -140,13 +140,18 @@ func (ch *Channel) NewStream(ctx context.Context, desc *grpc.StreamDesc, methodN
 	req.Header = h
 
 	cs := newClientStream(ctx, cancel, w, desc.ServerStreams, copts, ch.BaseURL)
-	// ensure that context is cancelled, even if caller
-	// fails to fully consume or cancel the stream
-	runtime.SetFinalizer(cs, func(*clientStream) { cancel() })
-
 	go cs.doHttpCall(ch.Transport, req)
 
-	return cs, nil
+	// ensure that context is cancelled, even if caller
+	// fails to fully consume or cancel the stream
+	ret := &clientStreamWrapper{cs}
+	runtime.SetFinalizer(ret, func(*clientStreamWrapper) { cancel() })
+
+	return ret, nil
+}
+
+type clientStreamWrapper struct {
+	grpc.ClientStream
 }
 
 func getPeer(baseUrl *url.URL, tls *tls.ConnectionState) *peer.Peer {
