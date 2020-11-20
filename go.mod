@@ -6,7 +6,7 @@ require (
 	github.com/golang/protobuf v1.3.5
 	github.com/gordonklaus/ineffassign v0.0.0-20200309095847-7953dde2c7bf // indirect
 	github.com/jhump/gopoet v0.1.0
-	github.com/jhump/goprotoc v0.2.0
+	github.com/jhump/goprotoc v0.3.0
 	github.com/jhump/protoreflect v1.5.0
 	github.com/nishanths/predeclared v0.0.0-20200524104333-86fad755b4d3 // indirect
 	golang.org/x/lint v0.0.0-20190313153728-d0100b6bd8b3 // indirect

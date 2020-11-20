@@ -24,7 +24,11 @@ func doCodeGen(req *plugins.CodeGenRequest, resp *plugins.CodeGenResponse) error
 	if err != nil {
 		return err
 	}
-	names := plugins.GoNames{ImportMap: args.importMap}
+	names := plugins.GoNames{
+		ImportMap:      args.importMap,
+		ModuleRoot:     args.moduleRoot,
+		SourceRelative: args.sourceRelative,
+	}
 	if args.importPath != "" {
 		// if we're overriding import path, go ahead and query
 		// package for each file, which will cache the override name
@@ -187,10 +191,12 @@ func (t templates) makeTemplate(templateText string) *template.Template {
 }
 
 type codeGenArgs struct {
-	debug       bool
-	legacyStubs bool
-	importPath  string
-	importMap   map[string]string
+	debug          bool
+	legacyStubs    bool
+	importPath     string
+	importMap      map[string]string
+	moduleRoot     string
+	sourceRelative bool
 }
 
 func parseArgs(args []string) (codeGenArgs, error) {
@@ -218,6 +224,25 @@ func parseArgs(args []string) (codeGenArgs, error) {
 			}
 			result.importPath = vals[1]
 
+		case "module":
+			if len(vals) == 1 {
+				return result, fmt.Errorf("plugin option 'module' requires an argument")
+			}
+			result.moduleRoot = vals[1]
+
+		case "paths":
+			if len(vals) == 1 {
+				return result, fmt.Errorf("plugin option 'paths' requires an argument")
+			}
+			switch vals[1] {
+			case "import":
+				result.sourceRelative = false
+			case "source_relative":
+				result.sourceRelative = true
+			default:
+				return result, fmt.Errorf("plugin option 'paths' accepts 'import' or 'source_relative' as value, got %q", vals[1])
+			}
+
 		default:
 			if len(vals[0]) > 1 && vals[0][0] == 'M' {
 				if len(vals) == 1 {
@@ -233,6 +258,11 @@ func parseArgs(args []string) (codeGenArgs, error) {
 			return result, fmt.Errorf("unknown plugin option: %s", vals[0])
 		}
 	}
+
+	if result.sourceRelative && result.moduleRoot != "" {
+		return result, fmt.Errorf("plugin option 'module' cannot be used with 'paths=source_relative'")
+	}
+
 	return result, nil
 }
 
