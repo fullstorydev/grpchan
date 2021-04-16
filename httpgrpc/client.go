@@ -24,6 +24,8 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/encoding"
+	grpcproto "google.golang.org/grpc/encoding/proto"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
@@ -60,7 +62,8 @@ func (ch *Channel) Invoke(ctx context.Context, methodName string, req, resp inte
 	h := headersFromContext(ctx)
 	h.Set("Content-Type", UnaryRpcContentType_V1)
 
-	b, err := proto.Marshal(req.(proto.Message))
+	codec := encoding.GetCodec(grpcproto.Name)
+	b, err := codec.Marshal(req)
 	if err != nil {
 		return err
 	}
@@ -110,7 +113,7 @@ func (ch *Channel) Invoke(ctx context.Context, methodName string, req, resp inte
 	if err != nil {
 		return err
 	}
-	return proto.Unmarshal(b, resp.(proto.Message))
+	return codec.Unmarshal(b, resp)
 }
 
 // NewStream satisfies the grpchan.Channel interface and supports sending
@@ -310,7 +313,7 @@ func (cs *clientStream) SendMsg(m interface{}) error {
 		return io.EOF
 	}
 
-	cs.wErr = writeProtoMessage(cs.w, m.(proto.Message), false)
+	cs.wErr = writeProtoMessage(cs.w, m, false)
 	return cs.wErr
 }
 
@@ -331,7 +334,8 @@ func (cs *clientStream) RecvMsg(m interface{}) error {
 			}
 			return err
 		}
-		err := proto.Unmarshal(msg, m.(proto.Message))
+		codec := encoding.GetCodec(grpcproto.Name)
+		err := codec.Unmarshal(msg, m)
 		if err != nil {
 			return status.Error(codes.Internal, fmt.Sprintf("server sent invalid message: %v", err))
 		}

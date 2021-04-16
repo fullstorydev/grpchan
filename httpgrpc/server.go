@@ -17,6 +17,8 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/encoding"
+	grpcproto "google.golang.org/grpc/encoding/proto"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
@@ -178,8 +180,9 @@ func handleMethod(svr interface{}, serviceName string, desc *grpc.MethodDesc, un
 			return
 		}
 
+		codec := encoding.GetCodec(grpcproto.Name)
 		dec := func(msg interface{}) error {
-			return proto.Unmarshal(req, msg.(proto.Message))
+			return codec.Unmarshal(req, msg)
 		}
 		sts := internal.UnaryServerTransportStream{Name: fullMethod}
 		resp, err := desc.Handler(svr, grpc.NewContextWithServerTransportStream(ctx, &sts), dec, unaryInt)
@@ -208,7 +211,7 @@ func handleMethod(svr interface{}, serviceName string, desc *grpc.MethodDesc, un
 			return
 		}
 
-		b, err := proto.Marshal(resp.(proto.Message))
+		b, err := codec.Marshal(resp)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError)
 			return
@@ -416,7 +419,7 @@ func (s *serverStream) SendMsg(m interface{}) error {
 	}
 
 	s.headersSent = true // sent implicitly
-	err := writeProtoMessage(s.w, m.(proto.Message), false)
+	err := writeProtoMessage(s.w, m, false)
 	if err != nil {
 		s.writeFailed = true
 	}
@@ -438,7 +441,7 @@ func (s *serverStream) RecvMsg(m interface{}) error {
 		return err
 	}
 
-	err = readProtoMessage(s.r.Body, size, m.(proto.Message))
+	err = readProtoMessage(s.r.Body, size, m)
 	if err == io.EOF {
 		return io.ErrUnexpectedEOF
 	} else if err != nil {
