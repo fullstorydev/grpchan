@@ -5,8 +5,8 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/golang/protobuf/jsonpb"
-	"github.com/golang/protobuf/proto"
+	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/fullstorydev/grpchan/httpgrpc"
 )
@@ -15,7 +15,7 @@ var (
 	source   *httpgrpc.HttpTrailer
 	sourceJs string // snapshot of source as JSON
 
-	jsm = &jsonpb.Marshaler{}
+	jsm = &protojson.MarshalOptions{}
 )
 
 func init() {
@@ -28,11 +28,11 @@ func init() {
 			"ghi": {Values: []string{"xyz", "123"}},
 		},
 	}
-	var err error
-	sourceJs, err = jsm.MarshalToString(source)
+	sourceJsBytes, err := jsm.Marshal(source)
 	if err != nil {
 		panic(err)
 	}
+	sourceJs = string(sourceJsBytes)
 }
 
 func TestProtoCloner(t *testing.T) {
@@ -73,7 +73,7 @@ func TestCopyFunc(t *testing.T) {
 		}
 		inM := in.(proto.Message)
 		outM := out.(proto.Message)
-		outM.Reset()
+		proto.Reset(outM)
 		proto.Merge(outM, inM)
 		return nil
 	}))
@@ -107,11 +107,11 @@ func checkIndependence(t *testing.T, dest *httpgrpc.HttpTrailer) {
 	dest.Metadata["ghi"].Values = append(dest.Metadata["ghi"].Values, "456")
 	dest.Metadata["jkl"] = &httpgrpc.TrailerValues{Values: []string{"zomg!"}}
 
-	sourceJs2, err := jsm.MarshalToString(source)
+	sourceJs2, err := jsm.Marshal(source)
 	if err != nil {
 		t.Fatalf("Failed to marsal message to JSON: %v", err)
 	}
-	if sourceJs2 != sourceJs {
-		t.Errorf("source changed after mutating dest!\nExpecting:\n%s\nGot:\n%s\n", sourceJs, sourceJs2)
+	if string(sourceJs2) != sourceJs {
+		t.Errorf("source changed after mutating dest!\nExpecting:\n%s\nGot:\n%s\n", sourceJs, string(sourceJs2))
 	}
 }

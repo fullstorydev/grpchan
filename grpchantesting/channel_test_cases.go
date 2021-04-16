@@ -8,14 +8,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/golang/protobuf/proto"
-	"github.com/golang/protobuf/ptypes"
-	"github.com/golang/protobuf/ptypes/any"
-	"github.com/golang/protobuf/ptypes/struct"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/anypb"
+	"google.golang.org/protobuf/types/known/structpb"
 )
 
 // RunChannelTestCases runs numerous test cases to exercise the behavior of the
@@ -73,15 +72,16 @@ var (
 			},
 		},
 	}
-	testErrorDetails []*any.Any
+	testErrorDetails []*anypb.Any
 )
 
 func init() {
 	for _, msg := range testErrorMessages {
-		if a, err := ptypes.MarshalAny(msg); err != nil {
+		var a anypb.Any
+		if err := anypb.MarshalFrom(&a, msg, proto.MarshalOptions{}); err != nil {
 			panic(err)
 		} else {
-			testErrorDetails = append(testErrorDetails, a)
+			testErrorDetails = append(testErrorDetails, &a)
 		}
 	}
 }
@@ -104,8 +104,8 @@ func testUnary(t *testing.T, cli TestServiceClient) {
 	}
 	t.Run("success", func(t *testing.T) {
 		var hdr, tlr metadata.MD
-		req := reqPrototype
-		rsp, err := cli.Unary(ctx, &req, grpc.Header(&hdr), grpc.Trailer(&tlr))
+		req := proto.Clone(&reqPrototype).(*Message)
+		rsp, err := cli.Unary(ctx, req, grpc.Header(&hdr), grpc.Trailer(&tlr))
 		if err != nil {
 			t.Fatalf("RPC failed: %v", err)
 		}
@@ -119,29 +119,29 @@ func testUnary(t *testing.T, cli TestServiceClient) {
 	})
 
 	t.Run("failure", func(t *testing.T) {
-		req := reqPrototype
+		req := proto.Clone(&reqPrototype).(*Message)
 		req.Code = int32(codes.AlreadyExists)
 		req.ErrorDetails = testErrorDetails
-		_, err := cli.Unary(ctx, &req)
+		_, err := cli.Unary(ctx, req)
 		checkError(t, err, codes.AlreadyExists, testErrorMessages...)
 	})
 
 	t.Run("timeout", func(t *testing.T) {
-		req := reqPrototype
+		req := proto.Clone(&reqPrototype).(*Message)
 		req.DelayMillis = 500
 		tctx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
 		defer cancel()
-		_, err := cli.Unary(tctx, &req)
+		_, err := cli.Unary(tctx, req)
 		checkError(t, err, codes.DeadlineExceeded)
 	})
 
 	t.Run("canceled", func(t *testing.T) {
-		req := reqPrototype
+		req := proto.Clone(&reqPrototype).(*Message)
 		req.DelayMillis = 500
 		cctx, cancel := context.WithCancel(ctx)
 		time.AfterFunc(100*time.Millisecond, cancel)
 
-		_, err := cli.Unary(cctx, &req)
+		_, err := cli.Unary(cctx, req)
 		checkError(t, err, codes.Canceled)
 	})
 }
@@ -159,18 +159,18 @@ func testClientStream(t *testing.T, cli TestServiceClient) {
 		if err != nil {
 			t.Fatalf("RPC failed: %v", err)
 		}
-		req := reqPrototype
-		err = cs.Send(&req)
+		req := proto.Clone(&reqPrototype).(*Message)
+		err = cs.Send(req)
 		if err != nil {
 			t.Fatalf("sending message #1 failed: %v", err)
 		}
 
-		err = cs.Send(&req)
+		err = cs.Send(req)
 		if err != nil {
 			t.Fatalf("sending message #2 failed: %v", err)
 		}
 
-		err = cs.Send(&req)
+		err = cs.Send(req)
 		if err != nil {
 			t.Fatalf("sending message #3 failed: %v", err)
 		}
@@ -191,7 +191,7 @@ func testClientStream(t *testing.T, cli TestServiceClient) {
 	})
 
 	t.Run("failure", func(t *testing.T) {
-		req := reqPrototype
+		req := proto.Clone(&reqPrototype).(*Message)
 		cs, err := cli.ClientStream(ctx)
 		if err != nil {
 			t.Fatalf("RPC failed: %v", err)
@@ -199,7 +199,7 @@ func testClientStream(t *testing.T, cli TestServiceClient) {
 
 		req.Code = int32(codes.ResourceExhausted)
 		req.ErrorDetails = testErrorDetails
-		err = cs.Send(&req)
+		err = cs.Send(req)
 		if err != nil {
 			t.Fatalf("sending message failed: %v", err)
 		}
@@ -211,7 +211,7 @@ func testClientStream(t *testing.T, cli TestServiceClient) {
 	})
 
 	t.Run("timeout", func(t *testing.T) {
-		req := reqPrototype
+		req := proto.Clone(&reqPrototype).(*Message)
 		tctx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
 		defer cancel()
 		cs, err := cli.ClientStream(tctx)
@@ -222,7 +222,7 @@ func testClientStream(t *testing.T, cli TestServiceClient) {
 		req.Code = int32(codes.OK)
 		req.DelayMillis = 500
 
-		err = cs.Send(&req)
+		err = cs.Send(req)
 		if err != nil {
 			t.Fatalf("sending message failed: %v", err)
 		}
@@ -232,7 +232,7 @@ func testClientStream(t *testing.T, cli TestServiceClient) {
 	})
 
 	t.Run("canceled", func(t *testing.T) {
-		req := reqPrototype
+		req := proto.Clone(&reqPrototype).(*Message)
 		cctx, cancel := context.WithCancel(ctx)
 		time.AfterFunc(100*time.Millisecond, cancel)
 
@@ -244,7 +244,7 @@ func testClientStream(t *testing.T, cli TestServiceClient) {
 		req.Code = int32(codes.OK)
 		req.DelayMillis = 500
 
-		err = cs.Send(&req)
+		err = cs.Send(req)
 		if err != nil {
 			t.Fatalf("sending message failed: %v", err)
 		}
@@ -264,8 +264,8 @@ func testServerStream(t *testing.T, cli TestServiceClient) {
 	}
 
 	t.Run("success", func(t *testing.T) {
-		req := reqPrototype
-		ss, err := cli.ServerStream(ctx, &req)
+		req := proto.Clone(&reqPrototype).(*Message)
+		ss, err := cli.ServerStream(ctx, req)
 		if err != nil {
 			t.Fatalf("RPC failed: %v", err)
 		}
@@ -291,11 +291,11 @@ func testServerStream(t *testing.T, cli TestServiceClient) {
 	})
 
 	t.Run("failure", func(t *testing.T) {
-		req := reqPrototype
+		req := proto.Clone(&reqPrototype).(*Message)
 		req.Count = 2
 		req.Code = int32(codes.FailedPrecondition)
 		req.ErrorDetails = testErrorDetails
-		ss, err := cli.ServerStream(ctx, &req)
+		ss, err := cli.ServerStream(ctx, req)
 		if err != nil {
 			t.Fatalf("RPC failed: %v", err)
 		}
@@ -319,14 +319,14 @@ func testServerStream(t *testing.T, cli TestServiceClient) {
 	})
 
 	t.Run("timeout", func(t *testing.T) {
-		req := reqPrototype
+		req := proto.Clone(&reqPrototype).(*Message)
 		tctx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
 		defer cancel()
 
 		req.Code = int32(codes.OK)
 		req.DelayMillis = 500
 
-		ss, err := cli.ServerStream(tctx, &req)
+		ss, err := cli.ServerStream(tctx, req)
 		if err != nil {
 			t.Fatalf("RPC failed: %v", err)
 		}
@@ -336,14 +336,14 @@ func testServerStream(t *testing.T, cli TestServiceClient) {
 	})
 
 	t.Run("canceled", func(t *testing.T) {
-		req := reqPrototype
+		req := proto.Clone(&reqPrototype).(*Message)
 		cctx, cancel := context.WithCancel(ctx)
 		time.AfterFunc(100*time.Millisecond, cancel)
 
 		req.Code = int32(codes.OK)
 		req.DelayMillis = 500
 
-		ss, err := cli.ServerStream(cctx, &req)
+		ss, err := cli.ServerStream(cctx, req)
 		if err != nil {
 			t.Fatalf("RPC failed: %v", err)
 		}
@@ -363,25 +363,25 @@ func testHalfDuplexBidiStream(t *testing.T, cli TestServiceClient) {
 	}
 
 	t.Run("success", func(t *testing.T) {
-		req := reqPrototype
+		req := proto.Clone(&reqPrototype).(*Message)
 		bidi, err := cli.BidiStream(ctx)
 		if err != nil {
 			t.Fatalf("RPC failed: %v", err)
 		}
 
-		err = bidi.Send(&req)
+		err = bidi.Send(req)
 		if err != nil {
 			t.Fatalf("sending message #1 failed: %v", err)
 		}
 		req.Headers = nil
 
-		err = bidi.Send(&req)
+		err = bidi.Send(req)
 		if err != nil {
 			t.Fatalf("sending message #2 failed: %v", err)
 		}
 
 		req.Trailers = testMdTrailers
-		err = bidi.Send(&req)
+		err = bidi.Send(req)
 		if err != nil {
 			t.Fatalf("sending message #3 failed: %v", err)
 		}
@@ -428,20 +428,20 @@ func testHalfDuplexBidiStream(t *testing.T, cli TestServiceClient) {
 	})
 
 	t.Run("failure", func(t *testing.T) {
-		req := reqPrototype
+		req := proto.Clone(&reqPrototype).(*Message)
 		bidi, err := cli.BidiStream(ctx)
 		if err != nil {
 			t.Fatalf("RPC failed: %v", err)
 		}
 
-		err = bidi.Send(&req)
+		err = bidi.Send(req)
 		if err != nil {
 			t.Fatalf("sending message #1 failed: %v", err)
 		}
 
 		req.Code = int32(codes.DataLoss)
 		req.ErrorDetails = testErrorDetails
-		err = bidi.Send(&req)
+		err = bidi.Send(req)
 		if err != nil {
 			t.Fatalf("sending message #2 failed: %v", err)
 		}
@@ -468,7 +468,7 @@ func testHalfDuplexBidiStream(t *testing.T, cli TestServiceClient) {
 	})
 
 	t.Run("timeout", func(t *testing.T) {
-		req := reqPrototype
+		req := proto.Clone(&reqPrototype).(*Message)
 		tctx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
 		defer cancel()
 		bidi, err := cli.BidiStream(tctx)
@@ -479,7 +479,7 @@ func testHalfDuplexBidiStream(t *testing.T, cli TestServiceClient) {
 		req.Code = int32(codes.OK)
 		req.DelayMillis = 500
 
-		err = bidi.Send(&req)
+		err = bidi.Send(req)
 		if err != nil {
 			t.Fatalf("sending message failed: %v", err)
 		}
@@ -494,7 +494,7 @@ func testHalfDuplexBidiStream(t *testing.T, cli TestServiceClient) {
 	})
 
 	t.Run("canceled", func(t *testing.T) {
-		req := reqPrototype
+		req := proto.Clone(&reqPrototype).(*Message)
 		cctx, cancel := context.WithCancel(ctx)
 		time.AfterFunc(100*time.Millisecond, cancel)
 
@@ -506,7 +506,7 @@ func testHalfDuplexBidiStream(t *testing.T, cli TestServiceClient) {
 		req.Code = int32(codes.OK)
 		req.DelayMillis = 500
 
-		err = bidi.Send(&req)
+		err = bidi.Send(req)
 		if err != nil {
 			t.Fatalf("sending message failed: %v", err)
 		}
@@ -530,14 +530,14 @@ func testFullDuplexBidiStream(t *testing.T, cli TestServiceClient) {
 	}
 
 	t.Run("success", func(t *testing.T) {
-		req := reqPrototype
+		req := proto.Clone(&reqPrototype).(*Message)
 		bidi, err := cli.BidiStream(ctx)
 		if err != nil {
 			t.Fatalf("RPC failed: %v", err)
 		}
 
 		for i := 0; i < 3; i++ {
-			err = bidi.Send(&req)
+			err = bidi.Send(req)
 			if err != nil {
 				t.Fatalf("sending message #%d failed: %v", i+1, err)
 			}
@@ -570,13 +570,13 @@ func testFullDuplexBidiStream(t *testing.T, cli TestServiceClient) {
 	})
 
 	t.Run("failure", func(t *testing.T) {
-		req := reqPrototype
+		req := proto.Clone(&reqPrototype).(*Message)
 		bidi, err := cli.BidiStream(ctx)
 		if err != nil {
 			t.Fatalf("RPC failed: %v", err)
 		}
 
-		err = bidi.Send(&req)
+		err = bidi.Send(req)
 		if err != nil {
 			t.Fatalf("sending message #1 failed: %v", err)
 		}
@@ -593,7 +593,7 @@ func testFullDuplexBidiStream(t *testing.T, cli TestServiceClient) {
 
 		req.Code = int32(codes.DataLoss)
 		req.ErrorDetails = testErrorDetails
-		err = bidi.Send(&req)
+		err = bidi.Send(req)
 		if err != nil {
 			t.Fatalf("sending message #2 failed: %v", err)
 		}
@@ -610,7 +610,7 @@ func testFullDuplexBidiStream(t *testing.T, cli TestServiceClient) {
 	})
 
 	t.Run("timeout", func(t *testing.T) {
-		req := reqPrototype
+		req := proto.Clone(&reqPrototype).(*Message)
 		tctx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
 		defer cancel()
 		bidi, err := cli.BidiStream(tctx)
@@ -619,7 +619,7 @@ func testFullDuplexBidiStream(t *testing.T, cli TestServiceClient) {
 		}
 
 		req.DelayMillis = 500
-		err = bidi.Send(&req)
+		err = bidi.Send(req)
 		if err != nil {
 			t.Fatalf("sending message failed: %v", err)
 		}
@@ -634,7 +634,7 @@ func testFullDuplexBidiStream(t *testing.T, cli TestServiceClient) {
 	})
 
 	t.Run("canceled", func(t *testing.T) {
-		req := reqPrototype
+		req := proto.Clone(&reqPrototype).(*Message)
 		cctx, cancel := context.WithCancel(ctx)
 		time.AfterFunc(100*time.Millisecond, cancel)
 
@@ -644,7 +644,7 @@ func testFullDuplexBidiStream(t *testing.T, cli TestServiceClient) {
 		}
 
 		req.DelayMillis = 500
-		err = bidi.Send(&req)
+		err = bidi.Send(req)
 		if err != nil {
 			t.Fatalf("sending message failed: %v", err)
 		}

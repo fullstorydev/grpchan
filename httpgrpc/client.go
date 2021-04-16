@@ -18,8 +18,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/golang/protobuf/proto"
-	"github.com/golang/protobuf/ptypes/any"
 	spb "google.golang.org/genproto/googleapis/rpc/status"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -29,6 +27,8 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/fullstorydev/grpchan/internal"
 )
@@ -529,15 +529,15 @@ func statFromResponse(reply *http.Response) *status.Status {
 		}
 	}
 	if code != codes.OK {
-		var details []*any.Any
+		var details []*anypb.Any
 		if detailHeaders := reply.Header[grpcDetailsHeader]; len(detailHeaders) > 0 {
-			details = make([]*any.Any, 0, len(detailHeaders))
+			details = make([]*anypb.Any, 0, len(detailHeaders))
 			for _, d := range detailHeaders {
 				b, err := base64.RawURLEncoding.DecodeString(d)
 				if err != nil {
 					continue
 				}
-				var msg any.Any
+				var msg anypb.Any
 				if err := proto.Unmarshal(b, &msg); err != nil {
 					continue
 				}

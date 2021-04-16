@@ -3,13 +3,14 @@
 
 package grpchantesting
 
+import "context"
 import "github.com/fullstorydev/grpchan"
-import "github.com/golang/protobuf/ptypes/empty"
-import "golang.org/x/net/context"
 import "google.golang.org/grpc"
+import "google.golang.org/protobuf/types/known/emptypb"
 
+// Deprecated: Use RegisterTestServiceServer instead.
 func RegisterHandlerTestService(reg grpchan.ServiceRegistry, srv TestServiceServer) {
-	reg.RegisterService(&_TestService_serviceDesc, srv)
+	reg.RegisterService(&TestService_ServiceDesc, srv)
 }
 
 type testServiceChannelClient struct {
@@ -31,7 +32,7 @@ func (c *testServiceChannelClient) Unary(ctx context.Context, in *Message, opts 
 }
 
 func (c *testServiceChannelClient) ClientStream(ctx context.Context, opts ...grpc.CallOption) (TestService_ClientStreamClient, error) {
-	stream, err := c.ch.NewStream(ctx, &_TestService_serviceDesc.Streams[0], "/grpchantesting.TestService/ClientStream", opts...)
+	stream, err := c.ch.NewStream(ctx, &TestService_ServiceDesc.Streams[0], "/grpchantesting.TestService/ClientStream", opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -40,7 +41,7 @@ func (c *testServiceChannelClient) ClientStream(ctx context.Context, opts ...grp
 }
 
 func (c *testServiceChannelClient) ServerStream(ctx context.Context, in *Message, opts ...grpc.CallOption) (TestService_ServerStreamClient, error) {
-	stream, err := c.ch.NewStream(ctx, &_TestService_serviceDesc.Streams[1], "/grpchantesting.TestService/ServerStream", opts...)
+	stream, err := c.ch.NewStream(ctx, &TestService_ServiceDesc.Streams[1], "/grpchantesting.TestService/ServerStream", opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -55,7 +56,7 @@ func (c *testServiceChannelClient) ServerStream(ctx context.Context, in *Message
 }
 
 func (c *testServiceChannelClient) BidiStream(ctx context.Context, opts ...grpc.CallOption) (TestService_BidiStreamClient, error) {
-	stream, err := c.ch.NewStream(ctx, &_TestService_serviceDesc.Streams[2], "/grpchantesting.TestService/BidiStream", opts...)
+	stream, err := c.ch.NewStream(ctx, &TestService_ServiceDesc.Streams[2], "/grpchantesting.TestService/BidiStream", opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -63,8 +64,8 @@ func (c *testServiceChannelClient) BidiStream(ctx context.Context, opts ...grpc.
 	return x, nil
 }
 
-func (c *testServiceChannelClient) UseExternalMessageTwice(ctx context.Context, in *empty.Empty, opts ...grpc.CallOption) (*empty.Empty, error) {
-	out := new(empty.Empty)
+func (c *testServiceChannelClient) UseExternalMessageTwice(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+	out := new(emptypb.Empty)
 	err := c.ch.Invoke(ctx, "/grpchantesting.TestService/UseExternalMessageTwice", in, out, opts...)
 	if err != nil {
 		return nil, err

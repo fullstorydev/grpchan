@@ -1,6 +1,6 @@
 package grpchantesting
 
-//go:generate protoc --proto_path=../ --go_out=plugins=grpc:../ --grpchan_out=legacy_stubs:../ grpchantesting/test.proto
+//go:generate protoc --proto_path=../ --go_out=./ --go-grpc_out=./ --grpchan_out=legacy_stubs:./ grpchantesting/test.proto
 
 import (
 	"context"
@@ -15,7 +15,9 @@ import (
 )
 
 // TestServer has default responses to the various kinds of methods.
-type TestServer struct{}
+type TestServer struct {
+	UnimplementedTestServiceServer
+}
 
 // Unary implements the TestService server interface.
 func (s *TestServer) Unary(ctx context.Context, req *Message) (*Message, error) {

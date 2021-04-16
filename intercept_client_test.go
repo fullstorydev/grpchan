@@ -7,11 +7,11 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/golang/protobuf/proto"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/fullstorydev/grpchan"
 	"github.com/fullstorydev/grpchan/grpchantesting"
@@ -68,14 +68,14 @@ func TestInterceptClientConnUnary(t *testing.T) {
 	}
 
 	expected := []interface{}{
-		&unaryCall{
+		&call{
 			methodName: "/grpchantesting.TestService/Unary",
-			req:        &grpchantesting.Message{},
+			reqs:       []interface{}{&grpchantesting.Message{}},
 			headers:    nil,
 		},
-		&unaryCall{
+		&call{
 			methodName: "/grpchantesting.TestService/Unary",
-			req:        &grpchantesting.Message{Count: 456},
+			reqs:       []interface{}{&grpchantesting.Message{Count: 456}},
 			headers:    metadata.Pairs("foo", "bar"),
 		},
 	}
@@ -212,7 +212,7 @@ func TestInterceptClientConnStream(t *testing.T) {
 	}
 
 	expected := []interface{}{
-		&streamCall{
+		&call{
 			methodName: "/grpchantesting.TestService/ClientStream",
 			reqs: []interface{}{
 				&grpchantesting.Message{},
@@ -221,12 +221,12 @@ func TestInterceptClientConnStream(t *testing.T) {
 			},
 			headers: nil,
 		},
-		&streamCall{
+		&call{
 			methodName: "/grpchantesting.TestService/ServerStream",
 			reqs:       []interface{}{&grpchantesting.Message{Count: 456}},
 			headers:    metadata.Pairs("foo", "bar"),
 		},
-		&streamCall{
+		&call{
 			methodName: "/grpchantesting.TestService/BidiStream",
 			reqs: []interface{}{
 				&grpchantesting.Message{Count: 333},
@@ -291,13 +291,7 @@ type testConn struct {
 	calls     []interface{} // elements are either *unaryCall or *streamCall
 }
 
-type unaryCall struct {
-	methodName string
-	headers    metadata.MD
-	req        interface{}
-}
-
-type streamCall struct {
+type call struct {
 	methodName string
 	headers    metadata.MD
 	reqs       []interface{}
@@ -309,7 +303,7 @@ func (ch *testConn) Invoke(ctx context.Context, methodName string, req, resp int
 	if err != nil {
 		return err
 	}
-	ch.calls = append(ch.calls, &unaryCall{methodName: methodName, headers: headers, req: reqClone})
+	ch.calls = append(ch.calls, &call{methodName: methodName, headers: headers, reqs: []interface{}{reqClone}})
 	if ch.code != codes.OK {
 		return status.Error(ch.code, ch.code.String())
 	}
@@ -321,7 +315,7 @@ func (ch *testConn) Invoke(ctx context.Context, methodName string, req, resp int
 
 func (ch *testConn) NewStream(ctx context.Context, desc *grpc.StreamDesc, methodName string, opts ...grpc.CallOption) (grpc.ClientStream, error) {
 	headers, _ := metadata.FromOutgoingContext(ctx)
-	call := &streamCall{methodName: methodName, headers: headers}
+	call := &call{methodName: methodName, headers: headers}
 	ch.calls = append(ch.calls, call)
 	count := ch.respCount
 	if !desc.ServerStreams {
@@ -349,7 +343,7 @@ type testClientStream struct {
 	respCount  int
 	headers    metadata.MD
 	trailers   metadata.MD
-	call       *streamCall
+	call       *call
 	halfClosed bool
 	closed     bool
 }

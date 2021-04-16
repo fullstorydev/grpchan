@@ -128,7 +128,7 @@ type Channel struct {
 }
 
 var _ grpc.ClientConnInterface = (*Channel)(nil)
-var _ grpchan.ServiceRegistry = (*Channel)(nil)
+var _ grpc.ServiceRegistrar = (*Channel)(nil)
 
 // RegisterService registers the given service and implementation. Like a normal
 // gRPC server, an in-process channel only allows a single implementation for a

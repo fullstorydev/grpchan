@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"reflect"
 
+	//lint:ignore SA1019 we use the old v1 package because
+	//  we need to support older generated messages
 	"github.com/golang/protobuf/proto"
 	"github.com/jhump/protoreflect/dynamic"
 	"google.golang.org/grpc"

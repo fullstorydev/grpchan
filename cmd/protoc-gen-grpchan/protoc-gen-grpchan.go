@@ -59,7 +59,7 @@ func doCodeGen(req *plugins.CodeGenRequest, resp *plugins.CodeGenResponse) error
 
 var typeOfRegistry = gopoet.NamedType(gopoet.NewSymbol("github.com/fullstorydev/grpchan", "ServiceRegistry"))
 var typeOfClientConn = gopoet.NamedType(gopoet.NewSymbol("google.golang.org/grpc", "ClientConnInterface"))
-var typeOfContext = gopoet.NamedType(gopoet.NewSymbol("golang.org/x/net/context", "Context"))
+var typeOfContext = gopoet.NamedType(gopoet.NewSymbol("context", "Context"))
 var typeOfCallOptions = gopoet.SliceType(gopoet.NamedType(gopoet.NewSymbol("google.golang.org/grpc", "CallOption")))
 
 func generateChanStubs(fd *desc.FileDescriptor, names *plugins.GoNames, resp *plugins.CodeGenResponse, args codeGenArgs) error {
@@ -79,9 +79,10 @@ func generateChanStubs(fd *desc.FileDescriptor, names *plugins.GoNames, resp *pl
 		lowerSvcName := gopoet.Unexport(svcName)
 
 		f.AddElement(gopoet.NewFunc(fmt.Sprintf("RegisterHandler%s", svcName)).
+			SetComment(fmt.Sprintf("Deprecated: Use Register%sServer instead.", svcName)).
 			AddArg("reg", typeOfRegistry).
 			AddArg("srv", names.GoTypeForServiceServer(sd)).
-			Printlnf("reg.RegisterService(&%s, srv)", names.GoNameOfServiceDesc(sd)))
+			Printlnf("reg.RegisterService(&%s, srv)", serviceDescVarName(sd, names, args.legacyDescNames)))
 
 		if !args.legacyStubs {
 			continue
@@ -92,6 +93,7 @@ func generateChanStubs(fd *desc.FileDescriptor, names *plugins.GoNames, resp *pl
 		f.AddType(cc)
 
 		f.AddElement(gopoet.NewFunc(fmt.Sprintf("New%sChannelClient", svcName)).
+			SetComment(fmt.Sprintf("Deprecated: Use New%sClient instead.", svcName)).
 			AddArg("ch", typeOfClientConn).
 			AddResult("", names.GoTypeForServiceClient(sd)).
 			SetComment(fmt.Sprintf("Deprecated: Use New%sClient instead.", svcName)).
@@ -110,7 +112,7 @@ func generateChanStubs(fd *desc.FileDescriptor, names *plugins.GoNames, resp *pl
 			}{
 				ServiceName:  sd.GetFullyQualifiedName(),
 				MethodName:   md.GetName(),
-				ServiceDesc:  names.GoNameOfServiceDesc(sd),
+				ServiceDesc:  serviceDescVarName(sd, names, args.legacyDescNames),
 				StreamClient: names.GoTypeForStreamClientImpl(md),
 				StreamIndex:  streamCount,
 				RequestType:  names.GoTypeForMessage(md.GetOutputType()),
@@ -179,6 +181,13 @@ func generateChanStubs(fd *desc.FileDescriptor, names *plugins.GoNames, resp *pl
 	return gopoet.WriteGoFile(out, f)
 }
 
+func serviceDescVarName(sd *desc.ServiceDescriptor, names *plugins.GoNames, legacyNames bool) string {
+	if legacyNames {
+		return names.GoNameOfServiceDesc(sd)
+	}
+	return names.GoNameOfExportedServiceDesc(sd).Name
+}
+
 type templates map[string]*template.Template
 
 func (t templates) makeTemplate(templateText string) *template.Template {
@@ -191,12 +200,13 @@ func (t templates) makeTemplate(templateText string) *template.Template {
 }
 
 type codeGenArgs struct {
-	debug          bool
-	legacyStubs    bool
-	importPath     string
-	importMap      map[string]string
-	moduleRoot     string
-	sourceRelative bool
+	debug           bool
+	legacyStubs     bool
+	legacyDescNames bool
+	importPath      string
+	importMap       map[string]string
+	moduleRoot      string
+	sourceRelative  bool
 }
 
 func parseArgs(args []string) (codeGenArgs, error) {
@@ -217,6 +227,13 @@ func parseArgs(args []string) (codeGenArgs, error) {
 				return result, err
 			}
 			result.legacyStubs = val
+
+		case "legacy_desc_names":
+			val, err := boolVal(vals)
+			if err != nil {
+				return result, err
+			}
+			result.legacyDescNames = val
 
 		case "import_path":
 			if len(vals) == 1 {

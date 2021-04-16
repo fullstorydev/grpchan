@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package main;
 
+option go_package = ".;main";
+
 message Test {
 	int64 id = 1;
 	string name = 2;

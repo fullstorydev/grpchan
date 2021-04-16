@@ -21,7 +21,7 @@ func TestInProcessChannel(t *testing.T) {
 	svr := &grpchantesting.TestServer{}
 
 	var cc inprocgrpc.Channel
-	grpchantesting.RegisterHandlerTestService(&cc, svr)
+	grpchantesting.RegisterTestServiceServer(&cc, svr)
 
 	before := runtime.NumGoroutine()
 
@@ -48,7 +48,7 @@ func TestUseDynamicMessage(t *testing.T) {
 	svr := &grpchantesting.TestServer{}
 
 	var cc inprocgrpc.Channel
-	grpchantesting.RegisterHandlerTestService(&cc, svr)
+	grpchantesting.RegisterTestServiceServer(&cc, svr)
 	stub := grpcdynamic.NewStub(&cc)
 
 	fd, err := desc.LoadFileDescriptor("grpchantesting/test.proto")

@@ -1,21 +1,21 @@
 package httpgrpc
 
 import (
-	"bytes"
-
-	"github.com/golang/protobuf/jsonpb"
+	//lint:ignore SA1019 we use the old v1 package because
+	//  we need to support older generated messages
 	"github.com/golang/protobuf/proto"
 	"google.golang.org/grpc/encoding"
+	"google.golang.org/protobuf/encoding/protojson"
 )
 
 var (
-	grpcJsonMarshaler = jsonpb.Marshaler{
-		EnumsAsInts:  true,
-		EmitDefaults: true,
+	grpcJsonMarshaler = protojson.MarshalOptions{
+		UseEnumNumbers:  true,
+		EmitUnpopulated: true,
 	}
 
-	grpcJsonUnmarshaler = jsonpb.Unmarshaler{
-		AllowUnknownFields: true,
+	grpcJsonUnmarshaler = protojson.UnmarshalOptions{
+		DiscardUnknown: true,
 	}
 )
 
@@ -26,14 +26,14 @@ func init() {
 type jsonCodec struct{}
 
 func (c jsonCodec) Marshal(v interface{}) ([]byte, error) {
-	var buf bytes.Buffer
-	err := grpcJsonMarshaler.Marshal(&buf, v.(proto.Message))
-	return buf.Bytes(), err
+	msg := proto.MessageV2(v.(proto.Message))
+	bb, err := grpcJsonMarshaler.Marshal(msg)
+	return bb, err
 }
 
 func (c jsonCodec) Unmarshal(data []byte, v interface{}) error {
-	return grpcJsonUnmarshaler.Unmarshal(bytes.NewReader(data), v.(proto.Message))
-
+	msg := proto.MessageV2(v.(proto.Message))
+	return grpcJsonUnmarshaler.Unmarshal(data, msg)
 }
 
 func (c jsonCodec) Name() string {

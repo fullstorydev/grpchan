@@ -9,16 +9,9 @@ import (
 
 // ServiceRegistry accumulates service definitions. Servers typically have this
 // interface for accumulating the services they expose.
-type ServiceRegistry interface {
-	// RegisterService registers the given handler to be used for the given
-	// service. Only a single handler can be registered for a given service. And
-	// services are identified by their fully-qualified name (e.g.
-	// "package.name.Service"). Attempting to register the same service more
-	// than once is an error that can panic.
-	RegisterService(desc *grpc.ServiceDesc, srv interface{})
-}
-
-var _ ServiceRegistry = (*grpc.Server)(nil)
+//
+// Deprecated: Use grpc.ServiceRegistrar instead.
+type ServiceRegistry = grpc.ServiceRegistrar
 
 // HandlerMap is used to accumulate service handlers into a map. The handlers
 // can be registered once in the map, and then re-used to configure multiple
@@ -26,7 +19,7 @@ var _ ServiceRegistry = (*grpc.Server)(nil)
 // as the internal store of registered handlers for a server implementation.
 type HandlerMap map[string]service
 
-var _ ServiceRegistry = HandlerMap(nil)
+var _ grpc.ServiceRegistrar = HandlerMap(nil)
 
 type service struct {
 	desc    *grpc.ServiceDesc
@@ -36,24 +29,50 @@ type service struct {
 // RegisterService registers the given handler to be used for the given service.
 // Only a single handler can be registered for a given service. And services are
 // identified by their fully-qualified name (e.g. "package.name.Service").
-func (r HandlerMap) RegisterService(desc *grpc.ServiceDesc, h interface{}) {
+func (m HandlerMap) RegisterService(desc *grpc.ServiceDesc, h interface{}) {
 	ht := reflect.TypeOf(desc.HandlerType).Elem()
 	st := reflect.TypeOf(h)
 	if !st.Implements(ht) {
 		panic(fmt.Sprintf("service %s: handler of type %v does not satisfy %v", desc.ServiceName, st, ht))
 	}
-	if _, ok := r[desc.ServiceName]; ok {
+	if _, ok := m[desc.ServiceName]; ok {
 		panic(fmt.Sprintf("service %s: handler already registered", desc.ServiceName))
 	}
-	r[desc.ServiceName] = service{desc: desc, handler: h}
+	m[desc.ServiceName] = service{desc: desc, handler: h}
 }
 
 // QueryService returns the service descriptor and handler for the named
 // service. If no handler has been registered for the named service, then
 // nil, nil is returned.
-func (r HandlerMap) QueryService(name string) (*grpc.ServiceDesc, interface{}) {
-	svc := r[name]
+func (m HandlerMap) QueryService(name string) (*grpc.ServiceDesc, interface{}) {
+	svc := m[name]
 	return svc.desc, svc.handler
+}
+
+// GetServiceInfo returns a snapshot of information about the currently
+// registered services in the map.
+//
+// This mirrors the method of the same name on *grpc.Server.
+func (m HandlerMap) GetServiceInfo() map[string]grpc.ServiceInfo {
+	ret := make(map[string]grpc.ServiceInfo, len(m))
+	for _, svc := range m {
+		methods := make([]grpc.MethodInfo, 0, len(svc.desc.Methods)+len(svc.desc.Streams))
+		for _, mtd := range svc.desc.Methods {
+			methods = append(methods, grpc.MethodInfo{Name: mtd.MethodName})
+		}
+		for _, mtd := range svc.desc.Streams {
+			methods = append(methods, grpc.MethodInfo{
+				Name:           mtd.StreamName,
+				IsClientStream: mtd.ClientStreams,
+				IsServerStream: mtd.ServerStreams,
+			})
+		}
+		ret[svc.desc.ServiceName] = grpc.ServiceInfo{
+			Methods:  methods,
+			Metadata: svc.desc.Metadata,
+		}
+	}
+	return ret
 }
 
 // ForEach calls the given function for each registered handler. The function is
@@ -78,8 +97,8 @@ func (r HandlerMap) QueryService(name string) (*grpc.ServiceDesc, interface{}) {
 //    //   And HTTP 1.1
 //    httpgrpc.HandleServices(http.HandleFunc, "/rpc/", reg, nil, nil)
 //
-func (r HandlerMap) ForEach(fn func(desc *grpc.ServiceDesc, svr interface{})) {
-	for _, svc := range r {
+func (m HandlerMap) ForEach(fn func(desc *grpc.ServiceDesc, svr interface{})) {
+	for _, svc := range m {
 		fn(svc.desc, svc.handler)
 	}
 }
