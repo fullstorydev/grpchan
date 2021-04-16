@@ -207,6 +207,7 @@ type clientStream struct {
 	cancel  context.CancelFunc
 	copts   *internal.CallOptions
 	baseUrl *url.URL
+	codec   encoding.Codec
 
 	// respStream is set to indicate whether client expects stream response; unary if false
 	respStream bool
@@ -239,6 +240,7 @@ func newClientStream(ctx context.Context, cancel context.CancelFunc, w io.WriteC
 		cancel:     cancel,
 		copts:      copts,
 		baseUrl:    baseUrl,
+		codec:      encoding.GetCodec(grpcproto.Name),
 		w:          w,
 		respStream: recvStream,
 		rCh:        make(chan []byte),
@@ -313,7 +315,7 @@ func (cs *clientStream) SendMsg(m interface{}) error {
 		return io.EOF
 	}
 
-	cs.wErr = writeProtoMessage(cs.w, m, false)
+	cs.wErr = writeProtoMessage(cs.w, cs.codec, m, false)
 	return cs.wErr
 }
 
@@ -334,8 +336,7 @@ func (cs *clientStream) RecvMsg(m interface{}) error {
 			}
 			return err
 		}
-		codec := encoding.GetCodec(grpcproto.Name)
-		err := codec.Unmarshal(msg, m)
+		err := cs.codec.Unmarshal(msg, m)
 		if err != nil {
 			return status.Error(codes.Internal, fmt.Sprintf("server sent invalid message: %v", err))
 		}
@@ -451,7 +452,7 @@ func (cs *clientStream) doHttpCall(transport http.RoundTripper, req *http.Reques
 			// final message is a trailer (need lock to write to cs.tr)
 			cs.rMu.Lock()
 			rMuHeld = true // defer above will unlock for us
-			cs.rErr = readProtoMessage(reply.Body, int32(-sz), &cs.tr)
+			cs.rErr = readProtoMessage(reply.Body, cs.codec, int32(-sz), &cs.tr)
 			if cs.rErr != nil {
 				if cs.rErr == io.EOF {
 					cs.rErr = io.ErrUnexpectedEOF

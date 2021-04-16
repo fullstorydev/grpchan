@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	"google.golang.org/grpc/encoding"
-	grpcproto "google.golang.org/grpc/encoding/proto"
 	"google.golang.org/grpc/metadata"
 )
 
@@ -29,8 +28,7 @@ func writeSizePreface(w io.Writer, sz int32) error {
 // size is written as a negative value, indicating to the receiver that this
 // is the last message in the stream. (The last message should be an instance
 // of HttpTrailer.)
-func writeProtoMessage(w io.Writer, m interface{}, end bool) error {
-	codec := encoding.GetCodec(grpcproto.Name)
+func writeProtoMessage(w io.Writer, codec encoding.Codec, m interface{}, end bool) error {
 	b, err := codec.Marshal(m)
 	if err != nil {
 		return err
@@ -72,7 +70,7 @@ func readSizePreface(in io.Reader) (int32, error) {
 // message. The sz parameter indicates the  number of bytes that must be read to
 // decode the proto. This does not first call readSizePreface; callers must do that
 // first.
-func readProtoMessage(in io.Reader, sz int32, m interface{}) error {
+func readProtoMessage(in io.Reader, codec encoding.Codec, sz int32, m interface{}) error {
 	if sz < 0 {
 		return fmt.Errorf("bad size preface: size cannot be negative: %d", sz)
 	} else if sz > maxMessageSize {
@@ -83,7 +81,6 @@ func readProtoMessage(in io.Reader, sz int32, m interface{}) error {
 	if err != nil {
 		return err
 	}
-	codec := encoding.GetCodec(grpcproto.Name)
 	return codec.Unmarshal(msg, m)
 }
 

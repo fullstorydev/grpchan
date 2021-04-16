@@ -1,5 +1,11 @@
 package httpgrpc
 
+import (
+	"google.golang.org/grpc/encoding"
+	grpcproto "google.golang.org/grpc/encoding/proto"
+	"strings"
+)
+
 // If the on-the-wire encoding every needs to be changed in a backwards-incompatible way,
 // here are the steps for doing so:
 //
@@ -30,3 +36,24 @@ const (
 	UnaryRpcContentType_V1  = "application/x-protobuf"
 	StreamRpcContentType_V1 = "application/x-httpgrpc-proto+v1"
 )
+
+func getCodec(contentType string) encoding.Codec {
+	if contentType == UnaryRpcContentType_V1 || contentType == StreamRpcContentType_V1 {
+		return encoding.GetCodec(grpcproto.Name)
+	}
+
+	// Try to find the best encoder.
+	if strings.HasPrefix(contentType, "application/grpc-") {
+		if c := encoding.GetCodec(strings.TrimPrefix(contentType, "application/grpc-")); c != nil {
+			return c
+		}
+	}
+
+	if strings.HasPrefix(contentType, "application/") {
+		if c := encoding.GetCodec(strings.TrimPrefix(contentType, "application/")); c != nil {
+			return c
+		}
+	}
+
+	return nil
+}
