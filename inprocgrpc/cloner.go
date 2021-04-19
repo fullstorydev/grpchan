@@ -34,7 +34,7 @@ var _ Cloner = ProtoCloner{}
 
 func (ProtoCloner) Copy(out, in interface{}) error {
 	_, outIsProto := out.(proto.Message)
-	_, inIsProto := out.(proto.Message)
+	_, inIsProto := in.(proto.Message)
 	if inIsProto && outIsProto {
 		return internal.CopyMessage(out, in)
 	}
