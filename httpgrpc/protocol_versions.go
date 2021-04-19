@@ -1,9 +1,11 @@
 package httpgrpc
 
 import (
+	"mime"
+	"strings"
+
 	"google.golang.org/grpc/encoding"
 	grpcproto "google.golang.org/grpc/encoding/proto"
-	"strings"
 )
 
 // If the on-the-wire encoding every needs to be changed in a backwards-incompatible way,
@@ -38,19 +40,23 @@ const (
 )
 
 func getCodec(contentType string) encoding.Codec {
-	if contentType == UnaryRpcContentType_V1 || contentType == StreamRpcContentType_V1 {
+	// Ignore any errors or charsets for now, just parse the main type.
+	// TODO: should this be more picky / return an error?  Maybe charset utf8 only?
+	mediaType, _, _ := mime.ParseMediaType(contentType)
+
+	if mediaType == UnaryRpcContentType_V1 || mediaType == StreamRpcContentType_V1 {
 		return encoding.GetCodec(grpcproto.Name)
 	}
 
 	// Try to find the best encoder.
-	if strings.HasPrefix(contentType, "application/grpc-") {
-		if c := encoding.GetCodec(strings.TrimPrefix(contentType, "application/grpc-")); c != nil {
+	if strings.HasPrefix(mediaType, "application/grpc-") {
+		if c := encoding.GetCodec(strings.TrimPrefix(mediaType, "application/grpc-")); c != nil {
 			return c
 		}
 	}
 
-	if strings.HasPrefix(contentType, "application/") {
-		if c := encoding.GetCodec(strings.TrimPrefix(contentType, "application/")); c != nil {
+	if strings.HasPrefix(mediaType, "application/") {
+		if c := encoding.GetCodec(strings.TrimPrefix(mediaType, "application/")); c != nil {
 			return c
 		}
 	}
