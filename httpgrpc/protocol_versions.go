@@ -1,5 +1,12 @@
 package httpgrpc
 
+import (
+	"mime"
+
+	"google.golang.org/grpc/encoding"
+	grpcproto "google.golang.org/grpc/encoding/proto"
+)
+
 // If the on-the-wire encoding every needs to be changed in a backwards-incompatible way,
 // here are the steps for doing so:
 //
@@ -30,3 +37,44 @@ const (
 	UnaryRpcContentType_V1  = "application/x-protobuf"
 	StreamRpcContentType_V1 = "application/x-httpgrpc-proto+v1"
 )
+
+const (
+	// Non-standard and experimental; uses the `jsonpb.Marshaler` by default.
+	// Only unary calls are supported; streams with JSON encoding are not supported.
+	// Use `encoding.RegisterCodec` to override the default encoder with a custom encoder.
+	ApplicationJson = "application/json"
+)
+
+func getUnaryCodec(contentType string) encoding.Codec {
+	// Ignore any errors or charsets for now, just parse the main type.
+	// TODO: should this be more picky / return an error?  Maybe charset utf8 only?
+	mediaType, _, _ := mime.ParseMediaType(contentType)
+
+	if mediaType == UnaryRpcContentType_V1 {
+		return encoding.GetCodec(grpcproto.Name)
+	}
+
+	if mediaType == ApplicationJson {
+		return encoding.GetCodec("json")
+	}
+
+	return nil
+}
+
+func getStreamingCodec(contentType string) encoding.Codec {
+	// Ignore any errors or charsets for now, just parse the main type.
+	// TODO: should this be more picky / return an error?  Maybe charset utf8 only?
+	mediaType, _, _ := mime.ParseMediaType(contentType)
+
+	if mediaType == StreamRpcContentType_V1 {
+		return encoding.GetCodec(grpcproto.Name)
+	}
+
+	if mediaType == ApplicationJson {
+		// TODO: support half-duplix JSON streaming?
+		// https://en.wikipedia.org/wiki/JSON_streaming#Record_separator-delimited_JSON
+		return nil
+	}
+
+	return nil
+}

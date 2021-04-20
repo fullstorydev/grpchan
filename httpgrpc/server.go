@@ -13,12 +13,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/golang/protobuf/proto"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/encoding"
-	grpcproto "google.golang.org/grpc/encoding/proto"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
@@ -158,11 +156,9 @@ func handleMethod(svr interface{}, serviceName string, desc *grpc.MethodDesc, un
 			return
 		}
 
-		// NB: This is where support for a second of the protocol would be implemented. This
-		// check would instead need to also accept a second content-type and the logic below
-		// for consuming the request and sending the response would need to switch based on
-		// the actual version in use.
-		if r.Header.Get("Content-Type") != UnaryRpcContentType_V1 {
+		contentType := r.Header.Get("Content-Type")
+		codec := getUnaryCodec(contentType)
+		if codec == nil {
 			writeError(w, http.StatusUnsupportedMediaType)
 			return
 		}
@@ -180,9 +176,11 @@ func handleMethod(svr interface{}, serviceName string, desc *grpc.MethodDesc, un
 			return
 		}
 
-		codec := encoding.GetCodec(grpcproto.Name)
 		dec := func(msg interface{}) error {
-			return codec.Unmarshal(req, msg)
+			if err := codec.Unmarshal(req, msg); err != nil {
+				return status.Error(codes.InvalidArgument, err.Error())
+			}
+			return nil
 		}
 		sts := internal.UnaryServerTransportStream{Name: fullMethod}
 		resp, err := desc.Handler(svr, grpc.NewContextWithServerTransportStream(ctx, &sts), dec, unaryInt)
@@ -200,7 +198,7 @@ func handleMethod(svr interface{}, serviceName string, desc *grpc.MethodDesc, un
 			statProto := st.Proto()
 			w.Header().Set("X-GRPC-Status", fmt.Sprintf("%d:%s", statProto.Code, statProto.Message))
 			for _, d := range statProto.Details {
-				b, err := proto.Marshal(d)
+				b, err := codec.Marshal(d)
 				if err != nil {
 					continue
 				}
@@ -217,7 +215,7 @@ func handleMethod(svr interface{}, serviceName string, desc *grpc.MethodDesc, un
 			return
 		}
 
-		w.Header().Set("Content-Type", UnaryRpcContentType_V1)
+		w.Header().Set("Content-Type", contentType)
 		w.Header().Set("Content-Length", fmt.Sprintf("%d", len(b)))
 		w.Write(b)
 	}
@@ -251,11 +249,9 @@ func handleStream(svr interface{}, serviceName string, desc *grpc.StreamDesc, st
 			return
 		}
 
-		// NB: This is where support for a second of the protocol would be implemented. This
-		// check would instead need to also accept a second content-type and the logic below
-		// for consuming the request and sending the response would need to switch based on
-		// the actual version in use.
-		if r.Header.Get("Content-Type") != StreamRpcContentType_V1 {
+		contentType := r.Header.Get("Content-Type")
+		codec := getStreamingCodec(contentType)
+		if codec == nil {
 			writeError(w, http.StatusUnsupportedMediaType)
 			return
 		}
@@ -267,9 +263,9 @@ func handleStream(svr interface{}, serviceName string, desc *grpc.StreamDesc, st
 		}
 		defer cancel()
 
-		w.Header().Set("Content-Type", StreamRpcContentType_V1)
+		w.Header().Set("Content-Type", contentType)
 
-		str := &serverStream{r: r, w: w, respStream: desc.ClientStreams}
+		str := &serverStream{r: r, w: w, respStream: desc.ClientStreams, codec: codec}
 		sts := internal.ServerTransportStream{Name: info.FullMethod, Stream: str}
 		str.ctx = grpc.NewContextWithServerTransportStream(ctx, &sts)
 		if streamInt != nil {
@@ -302,7 +298,7 @@ func handleStream(svr interface{}, serviceName string, desc *grpc.StreamDesc, st
 			tr.Details = statProto.Details
 		}
 
-		writeProtoMessage(w, &tr, true)
+		writeProtoMessage(w, codec, &tr, true)
 	}
 }
 
@@ -354,6 +350,7 @@ type serverStream struct {
 	ctx context.Context
 	// respStream is set to indicate whether client expects stream response; unary if false
 	respStream bool
+	codec      encoding.Codec
 
 	// rmu serializes access to r and protects recvd
 	rmu sync.Mutex
@@ -419,7 +416,7 @@ func (s *serverStream) SendMsg(m interface{}) error {
 	}
 
 	s.headersSent = true // sent implicitly
-	err := writeProtoMessage(s.w, m, false)
+	err := writeProtoMessage(s.w, s.codec, m, false)
 	if err != nil {
 		s.writeFailed = true
 	}
@@ -441,7 +438,7 @@ func (s *serverStream) RecvMsg(m interface{}) error {
 		return err
 	}
 
-	err = readProtoMessage(s.r.Body, size, m)
+	err = readProtoMessage(s.r.Body, s.codec, size, m)
 	if err == io.EOF {
 		return io.ErrUnexpectedEOF
 	} else if err != nil {
