@@ -157,7 +157,7 @@ func handleMethod(svr interface{}, serviceName string, desc *grpc.MethodDesc, un
 		}
 
 		contentType := r.Header.Get("Content-Type")
-		codec := getCodec(contentType)
+		codec := getUnaryCodec(contentType)
 		if codec == nil {
 			writeError(w, http.StatusUnsupportedMediaType)
 			return
@@ -250,7 +250,7 @@ func handleStream(svr interface{}, serviceName string, desc *grpc.StreamDesc, st
 		}
 
 		contentType := r.Header.Get("Content-Type")
-		codec := getCodec(contentType)
+		codec := getStreamingCodec(contentType)
 		if codec == nil {
 			writeError(w, http.StatusUnsupportedMediaType)
 			return

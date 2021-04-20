@@ -2,7 +2,6 @@ package httpgrpc
 
 import (
 	"mime"
-	"strings"
 
 	"google.golang.org/grpc/encoding"
 	grpcproto "google.golang.org/grpc/encoding/proto"
@@ -39,26 +38,42 @@ const (
 	StreamRpcContentType_V1 = "application/x-httpgrpc-proto+v1"
 )
 
-func getCodec(contentType string) encoding.Codec {
+const (
+	// Non-standard and experimental; uses the `jsonpb.Marshaler` by default.
+	// Only unary calls are supported; streams with JSON encoding are not supported.
+	// Use `encoding.RegisterCodec` to override the default encoder with a custom encoder.
+	ApplicationJson = "application/json"
+)
+
+func getUnaryCodec(contentType string) encoding.Codec {
 	// Ignore any errors or charsets for now, just parse the main type.
 	// TODO: should this be more picky / return an error?  Maybe charset utf8 only?
 	mediaType, _, _ := mime.ParseMediaType(contentType)
 
-	if mediaType == UnaryRpcContentType_V1 || mediaType == StreamRpcContentType_V1 {
+	if mediaType == UnaryRpcContentType_V1 {
 		return encoding.GetCodec(grpcproto.Name)
 	}
 
-	// Try to find the best encoder.
-	if strings.HasPrefix(mediaType, "application/grpc-") {
-		if c := encoding.GetCodec(strings.TrimPrefix(mediaType, "application/grpc-")); c != nil {
-			return c
-		}
+	if mediaType == ApplicationJson {
+		return encoding.GetCodec("json")
 	}
 
-	if strings.HasPrefix(mediaType, "application/") {
-		if c := encoding.GetCodec(strings.TrimPrefix(mediaType, "application/")); c != nil {
-			return c
-		}
+	return nil
+}
+
+func getStreamingCodec(contentType string) encoding.Codec {
+	// Ignore any errors or charsets for now, just parse the main type.
+	// TODO: should this be more picky / return an error?  Maybe charset utf8 only?
+	mediaType, _, _ := mime.ParseMediaType(contentType)
+
+	if mediaType == StreamRpcContentType_V1 {
+		return encoding.GetCodec(grpcproto.Name)
+	}
+
+	if mediaType == ApplicationJson {
+		// TODO: support half-duplix JSON streaming?
+		// https://en.wikipedia.org/wiki/JSON_streaming#Record_separator-delimited_JSON
+		return nil
 	}
 
 	return nil
