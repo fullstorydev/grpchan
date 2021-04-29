@@ -134,8 +134,9 @@ func (ch *Channel) NewStream(ctx context.Context, desc *grpc.StreamDesc, methodN
 	h := headersFromContext(ctx)
 	h.Set("Content-Type", StreamRpcContentType_V1)
 
+	// Intercept r.Close() so we can control the error sent across to the writer thread.
 	r, w := io.Pipe()
-	req, err := http.NewRequest("POST", reqUrlStr, r)
+	req, err := http.NewRequest("POST", reqUrlStr, ioutil.NopCloser(r))
 	if err != nil {
 		cancel()
 		return nil, err
@@ -143,7 +144,7 @@ func (ch *Channel) NewStream(ctx context.Context, desc *grpc.StreamDesc, methodN
 	req.Header = h
 
 	cs := newClientStream(ctx, cancel, w, desc.ServerStreams, copts, ch.BaseURL)
-	go cs.doHttpCall(ch.Transport, req)
+	go cs.doHttpCall(ch.Transport, req, r)
 
 	// ensure that context is cancelled, even if caller
 	// fails to fully consume or cancel the stream
@@ -381,7 +382,7 @@ func (cs *clientStream) RecvMsg(m interface{}) error {
 
 // doHttpCall performs the HTTP round trip and then reads the reply body,
 // sending delimited messages to the clientStream via a channel.
-func (cs *clientStream) doHttpCall(transport http.RoundTripper, req *http.Request) {
+func (cs *clientStream) doHttpCall(transport http.RoundTripper, req *http.Request, readPipe *io.PipeReader) {
 	// On completion, we must fill in cs.tr or cs.rErr and then close channel,
 	// which signals to client code that we've reached end-of-stream.
 
@@ -398,6 +399,7 @@ func (cs *clientStream) doHttpCall(transport http.RoundTripper, req *http.Reques
 			cs.rErr = rErr
 		}
 		cs.done = true
+		readPipe.CloseWithError(rErr)
 		close(cs.rCh)
 	}()
 
@@ -416,7 +418,10 @@ func (cs *clientStream) doHttpCall(transport http.RoundTripper, req *http.Reques
 		onReady(statusFromContextError(err), nil)
 		return
 	}
-	defer reply.Body.Close()
+	defer func() {
+		ioutil.ReadAll(reply.Body)
+		reply.Body.Close()
+	}()
 
 	if len(cs.copts.Peer) > 0 {
 		cs.copts.SetPeer(getPeer(cs.baseUrl, reply.TLS))
