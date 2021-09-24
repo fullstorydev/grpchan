@@ -1,6 +1,6 @@
 # gRPC Channels
 
-[![Build Status](https://travis-ci.com/fullstorydev/grpchan.svg?branch=master)](https://travis-ci.com/github/fullstorydev/grpchan/branches)
+[![Build Status](https://circleci.com/gh/fullstorydev/grpchan/tree/master.svg?style=svg)](https://circleci.com/gh/fullstorydev/grpchan/tree/master)
 [![Go Report Card](https://goreportcard.com/badge/github.com/fullstorydev/grpchan)](https://goreportcard.com/report/github.com/fullstorydev/grpchan)
 [![GoDoc](https://godoc.org/github.com/fullstorydev/grpchan?status.svg)](https://godoc.org/github.com/fullstorydev/grpchan)
 
