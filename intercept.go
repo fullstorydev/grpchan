@@ -52,7 +52,7 @@ func unwrap(ch grpc.ClientConnInterface) grpc.ClientConnInterface {
 		if !ok {
 			return ch
 		}
-		ch = w
+		ch = w.Unwrap()
 	}
 }
 
