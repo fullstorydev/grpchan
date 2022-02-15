@@ -27,8 +27,9 @@ checkgofmt:
 
 .PHONY: generate
 generate:
-	@GO111MODULE=on go install ./cmd/protoc-gen-grpchan
-	@GO111MODULE=on go install github.com/golang/protobuf/protoc-gen-go
+	@go install ./cmd/protoc-gen-grpchan
+	@go install google.golang.org/protobuf/cmd/protoc-gen-go@a709e31e5d12
+	@go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.1.0
 	go generate ./...
 
 .PHONY: vet
@@ -37,17 +38,17 @@ vet:
 
 .PHONY: staticcheck
 staticcheck:
-	@GO111MODULE=on go install honnef.co/go/tools/cmd/staticcheck
+	@GO111MODULE=on go install honnef.co/go/tools/cmd/staticcheck@v0.0.1-2020.1.4
 	staticcheck ./...
 
 .PHONY: ineffassign
 ineffassign:
-	@GO111MODULE=on go install github.com/gordonklaus/ineffassign
+	@GO111MODULE=on go install github.com/gordonklaus/ineffassign@v0.0.0-20200309095847-7953dde2c7bf
 	ineffassign .
 
 .PHONY: predeclared
 predeclared:
-	@GO111MODULE=on go install github.com/nishanths/predeclared
+	@GO111MODULE=on go install github.com/nishanths/predeclared@v0.0.0-20200524104333-86fad755b4d3
 	predeclared .
 
 # Intentionally omitted from CI, but target here for ad-hoc reports.
