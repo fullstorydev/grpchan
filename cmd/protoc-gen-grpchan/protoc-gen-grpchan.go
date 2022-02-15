@@ -13,6 +13,7 @@ import (
 	"github.com/jhump/gopoet"
 	"github.com/jhump/goprotoc/plugins"
 	"github.com/jhump/protoreflect/desc"
+	"google.golang.org/protobuf/types/pluginpb"
 )
 
 func main() {
@@ -20,6 +21,7 @@ func main() {
 }
 
 func doCodeGen(req *plugins.CodeGenRequest, resp *plugins.CodeGenResponse) error {
+	resp.SupportsFeatures(pluginpb.CodeGeneratorResponse_FEATURE_PROTO3_OPTIONAL)
 	args, err := parseArgs(req.Args)
 	if err != nil {
 		return err
