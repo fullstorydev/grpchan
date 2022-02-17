@@ -25,6 +25,99 @@ import (
 	"github.com/fullstorydev/grpchan/internal"
 )
 
+// Server is a gRPC-over-HTTP server. It acts as a grpc.ServiceRegistrar,
+// for registering server implementations, and also implements http.Handler,
+// for exposing the services via HTTP.
+type Server struct {
+	mux       http.ServeMux
+	handlers  grpchan.HandlerMap
+	basePath  string
+	unaryInt  grpc.UnaryServerInterceptor
+	streamInt grpc.StreamServerInterceptor
+	opts      handlerOpts
+}
+
+// ServerOption is an option used when constructing a NewServer.
+type ServerOption interface {
+	apply(*Server)
+}
+
+type serverOptFunc func(*Server)
+
+func (fn serverOptFunc) apply(s *Server) {
+	fn(s)
+}
+
+// WithBasePath configured the gRPC-over-HTTP server to use the given base path.
+// The default base path is "/". If the caller mounts the *httpgrpc.Server at
+// some sub-path, this can be used to inform the handler of that path. As an
+// alternative, the caller could instead use http.StripPrefix so that the
+// *httpgrpc.Server does not need to know the sub-path.
+func WithBasePath(path string) ServerOption {
+	return serverOptFunc(func(s *Server) {
+		s.basePath = path
+	})
+}
+
+// WithServerUnaryInterceptor configures the gRPC-over-HTTP server to use the given
+// server interceptor for unary RPCs when dispatching.
+func WithServerUnaryInterceptor(interceptor grpc.UnaryServerInterceptor) ServerOption {
+	return serverOptFunc(func(s *Server) {
+		s.unaryInt = interceptor
+	})
+}
+
+// WithServerStreamInterceptor configures the gRP-over-HTTP server to use the
+// given server interceptor for streaming RPCs when dispatching.
+func WithServerStreamInterceptor(interceptor grpc.StreamServerInterceptor) ServerOption {
+	return serverOptFunc(func(s *Server) {
+		s.streamInt = interceptor
+	})
+}
+
+// NewServer returns a new gRPC-over-HTTP server. The given options (which can
+// include instances of HandlerOption) can be used to customize the server behavior.
+func NewServer(opts ...ServerOption) *Server {
+	var s Server
+	s.basePath = "/"
+	s.handlers = grpchan.HandlerMap{}
+	for _, o := range opts {
+		o.apply(&s)
+	}
+	return &s
+}
+
+// RegisterService registers the given service and implementation. Like a normal
+// gRPC server, a gRPC-over-HTTP server only allows a single implementation for a
+// particular service. Services are identified by their fully-qualified name
+// (e.g. "<package>.<service>").
+func (s *Server) RegisterService(desc *grpc.ServiceDesc, svr interface{}) {
+	s.handlers.RegisterService(desc, svr)
+	for i := range desc.Methods {
+		md := desc.Methods[i]
+		h := handleMethod(svr, desc.ServiceName, &md, s.unaryInt, &s.opts)
+		s.mux.HandleFunc(path.Join(s.basePath, fmt.Sprintf("%s/%s", desc.ServiceName, md.MethodName)), h)
+	}
+	for i := range desc.Streams {
+		sd := desc.Streams[i]
+		h := handleStream(svr, desc.ServiceName, &sd, s.streamInt, &s.opts)
+		s.mux.HandleFunc(path.Join(s.basePath, fmt.Sprintf("%s/%s", desc.ServiceName, sd.StreamName)), h)
+	}
+}
+
+// GetServiceInfo returns information about the registered services. This allows
+// the channel to implement the reflection.GRPCServer interface (so that a
+// gRPC-over-HTTP channel be the source of descriptors for server reflection).
+func (s *Server) GetServiceInfo() map[string]grpc.ServiceInfo {
+	return s.handlers.GetServiceInfo()
+}
+
+// ServeHTTP implements http.Handler, allowing the server to be attached to an
+// *http.Server, to actually expose the registered servers to HTTP clients.
+func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	s.mux.ServeHTTP(w, r)
+}
+
 // Mux is a function that can register a gRPC-over-HTTP handler. This is used to
 // register handlers in bulk for an RPC service. Its signature matches that of
 // the HandleFunc method of the http.ServeMux type, and it also matches that of
@@ -36,7 +129,13 @@ type Mux func(pattern string, handler func(http.ResponseWriter, *http.Request))
 
 // HandlerOption is an option to customize some aspect of the HTTP handler
 // behavior, such as rendering gRPC errors to HTTP responses.
+//
+// HandlerOptions also implement ServerOption.
 type HandlerOption func(*handlerOpts)
+
+func (ho HandlerOption) apply(s *Server) {
+	ho(&s.opts)
+}
 
 type handlerOpts struct {
 	errFunc func(context.Context, *status.Status, http.ResponseWriter)

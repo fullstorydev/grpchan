@@ -8,6 +8,16 @@
 // request and then proxy it on loopback to the actual GRPC server. So GRPC service
 // handlers are dispatched directly from HTTP server handlers.
 //
+// Clients create a *httpgrpc.Channel value, setting the two required fields to configure
+// it. This value can then be used to create RPC stubs, for sending RPCs to the configured
+// destination.
+//
+// Servers can expose individual methods using httpgrpc.HandleMethod or httpgrpc.HandleStream;
+// they can accumulate (1 or more) servers in a grpchan.HandlerMap and then use HandleServices
+// to expose them all; or they can create a httpgrpc.NewServer and register services on that
+// and use that to expose the services. The httpgrpc.NewServer route is the simplest and most
+// intuitive and really supersedes the other two options.
+//
 // Caveats
 //
 // There are couple of limitations when using this package:
