@@ -37,6 +37,9 @@ type Server struct {
 	opts      handlerOpts
 }
 
+var _ http.Handler = (*Server)(nil)
+var _ grpc.ServiceRegistrar = (*Server)(nil)
+
 // ServerOption is an option used when constructing a NewServer.
 type ServerOption interface {
 	apply(*Server)
