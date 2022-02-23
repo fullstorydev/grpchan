@@ -141,6 +141,16 @@ func (c *Channel) RegisterService(desc *grpc.ServiceDesc, svr interface{}) {
 	c.handlers.RegisterService(desc, svr)
 }
 
+// GetServiceInfo returns information about the registered services. This allows
+// the channel to implement the reflection.GRPCServer interface (so that an
+// in-process channel be the source of descriptors for server reflection).
+func (c *Channel) GetServiceInfo() map[string]grpc.ServiceInfo {
+	if c.handlers == nil {
+		return nil
+	}
+	return c.handlers.GetServiceInfo()
+}
+
 // WithServerUnaryInterceptor configures the in-process channel to use the given
 // server interceptor for unary RPCs when dispatching.
 func (c *Channel) WithServerUnaryInterceptor(interceptor grpc.UnaryServerInterceptor) *Channel {
