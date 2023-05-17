@@ -3,9 +3,9 @@ package httpgrpc
 import (
 	//lint:ignore SA1019 we use the old v1 package because
 	//  we need to support older generated messages
-	"github.com/golang/protobuf/proto"
 	"google.golang.org/grpc/encoding"
 	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/proto"
 )
 
 var (
