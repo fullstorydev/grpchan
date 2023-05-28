@@ -7,11 +7,11 @@ import (
 
 	//lint:ignore SA1019 we use the old v1 package because
 	//  we need to support older generated messages
+	"github.com/golang/protobuf/proto"
 	"github.com/jhump/protoreflect/dynamic"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-	"google.golang.org/protobuf/proto"
 )
 
 // CopyMessage copies data from the given in value to the given out value. It returns an

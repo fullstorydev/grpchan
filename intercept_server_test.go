@@ -3,6 +3,7 @@ package grpchan_test
 import (
 	"context"
 	"fmt"
+	"github.com/golang/protobuf/ptypes/empty"
 	"io"
 	"reflect"
 	"testing"
@@ -13,7 +14,6 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/emptypb"
-	empty "google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/fullstorydev/grpchan"
 	"github.com/fullstorydev/grpchan/grpchantesting"

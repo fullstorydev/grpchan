@@ -7,11 +7,11 @@ import (
 	"io"
 	"time"
 
+	"github.com/golang/protobuf/ptypes/empty"
 	spb "google.golang.org/genproto/googleapis/rpc/status"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
-	empty "google.golang.org/protobuf/types/known/emptypb"
 )
 
 // TestServer has default responses to the various kinds of methods.
