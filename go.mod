@@ -7,6 +7,7 @@ require (
 	github.com/jhump/gopoet v0.1.0
 	github.com/jhump/goprotoc v0.5.0
 	github.com/jhump/protoreflect v1.11.0
+	github.com/siadat/ipc v1.0.0 // indirect
 	google.golang.org/genproto v0.0.0-20200526211855-cb27e3aa2013
 	google.golang.org/grpc v1.38.0
 	google.golang.org/protobuf v1.26.0
