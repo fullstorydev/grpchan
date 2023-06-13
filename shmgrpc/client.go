@@ -6,11 +6,12 @@ import (
 	"fmt"
 	"net/url"
 	"path"
-	"time"
 
 	"github.com/fullstorydev/grpchan/internal"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/encoding"
+	grpcproto "google.golang.org/grpc/encoding/proto"
 
 	"github.com/siadat/ipc"
 )
@@ -25,23 +26,14 @@ type Channel struct {
 var _ grpc.ClientConnInterface = (*Channel)(nil)
 
 func (ch *Channel) Invoke(ctx context.Context, methodName string, req, resp interface{}, opts ...grpc.CallOption) error {
-	copts := internal.GetCallOptions(opts)
 
-	reqUrl := *ch.BaseURL
-	reqUrl.Path = path.Join(reqUrl.Path, methodName)
-	reqUrlStr := reqUrl.String()
-
-	ctx, err := internal.ApplyPerRPCCreds(ctx, copts, fmt.Sprintf("shm:0%s", reqUrlStr), true)
-
-	if err != nil {
-		return err
-	}
-
+	//Generate Key
 	key, err := ipc.Ftok(ch.ShmQueueInfo.QueuePath, ch.ShmQueueInfo.QueueId)
 	if err != nil {
 		panic(err)
 	}
 
+	//Get qid
 	qid, err := ipc.Msgget(key, ipc.IPC_CREAT|0666)
 	if err != nil {
 		panic(fmt.Sprintf("CLIENT: Failed to create ipc key %d: %s\n", key, err))
@@ -49,24 +41,45 @@ func (ch *Channel) Invoke(ctx context.Context, methodName string, req, resp inte
 		fmt.Printf("CLIENT: Create ipc queue id %d\n", qid)
 	}
 
-	message_request := &ShmMessage{
-		Method:  methodName,
-		Payload: req,
-	}
+	//Get Call Options for
+	copts := internal.GetCallOptions(opts)
 
-	// we have the request
-	// Marshall it temporarily to build rest of system
-	serialized_message, err := json.Marshal(message_request)
+	//Get headersFromContext
+	reqUrl := *ch.BaseURL
+	reqUrl.Path = path.Join(reqUrl.Path, methodName)
+	reqUrlStr := reqUrl.String()
+
+	ctx, err = internal.ApplyPerRPCCreds(ctx, copts, fmt.Sprintf("shm:0%s", reqUrlStr), true)
 	if err != nil {
 		return err
 	}
 
+	message_request_meta := &ShmMessage{
+		Method:  methodName,
+		Context: ctx,
+	}
+	// we have the meta request
+	// Marshall to build rest of system
+	serialized_message_meta, err := json.Marshal(message_request_meta)
+	if err != nil {
+		return err
+	}
+	// pass into shared mem queue
+	msg_req_meta := &ipc.Msgbuf{
+		Mtype: ch.ShmQueueInfo.QueueReqTypeMeta, //Request message type
+		Mtext: serialized_message_meta,          // Isnt this technically serialization?
+	}
+
+	codec := encoding.GetCodec(grpcproto.Name)
+
+	serialized_payload, err := codec.Marshal(req)
 	// pass into shared mem queue
 	msg_req := &ipc.Msgbuf{
 		Mtype: ch.ShmQueueInfo.QueueReqType, //Request message type
-		Mtext: serialized_message,           // Isnt this technically serialization?
+		Mtext: serialized_payload,           // Isnt this technically serialization?
 	}
 
+	err = ipc.Msgsnd(qid, msg_req_meta, 0)
 	err = ipc.Msgsnd(qid, msg_req, 0)
 	if err != nil {
 		panic(fmt.Sprintf("CLIENT: Failed to send message to ipc id %d: %s\n", qid, err))
@@ -78,8 +91,6 @@ func (ch *Channel) Invoke(ctx context.Context, methodName string, req, resp inte
 	msg_rep := &ipc.Msgbuf{
 		Mtype: ch.ShmQueueInfo.QueueRespType}
 
-	time.Sleep(5 * time.Second)
-
 	err = ipc.Msgrcv(qid, msg_rep, 0)
 
 	if err != nil {
@@ -89,7 +100,7 @@ func (ch *Channel) Invoke(ctx context.Context, methodName string, req, resp inte
 	}
 	// ipc.Msgctl(qid, ipc.IPC_RMID)
 
-	return nil
+	return codec.Unmarshal(msg_rep.Mtext, resp)
 }
 
 func (ch *Channel) NewStream(ctx context.Context, desc *grpc.StreamDesc, methodName string, opts ...grpc.CallOption) (grpc.ClientStream, error) {

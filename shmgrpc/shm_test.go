@@ -12,10 +12,11 @@ import (
 func TestGrpcOvverSharedMemory(t *testing.T) {
 
 	qi := shmgrpc.QueueInfo{
-		QueuePath:     "/Users/estebanramos/projects/microservices_work/app_testing/grpchan/shmgrpc/shm_test.go",
-		QueueId:       42,
-		QueueReqType:  1,
-		QueueRespType: 2,
+		QueuePath:        "/Users/estebanramos/projects/microservices_work/app_testing/grpchan/shmgrpc/shm_test.go",
+		QueueId:          42,
+		QueueReqType:     2,
+		QueueReqTypeMeta: 1,
+		QueueRespType:    4,
 	}
 
 	// svr := &grpchantesting.TestServer{}
@@ -27,7 +28,7 @@ func TestGrpcOvverSharedMemory(t *testing.T) {
 	//Server Can have
 	grpchantesting.RegisterTestServiceServer(svr, svc)
 
-	//Placeholder URL
+	//Placeholder URL????
 	u, err := url.Parse(fmt.Sprintf("http://127.0.0.1:8080"))
 	if err != nil {
 		t.Fatalf("failed to parse base URL: %v", err)
