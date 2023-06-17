@@ -9,7 +9,7 @@ import (
 	"github.com/fullstorydev/grpchan/shmgrpc"
 )
 
-func TestGrpcOverSharedMemory(t *testing.T) {
+func BenchmarkGrpcOverSharedMemory(b *testing.B) {
 
 	qi := shmgrpc.QueueInfo{
 		QueuePath:         "/Users/estebanramos/projects/microservices_work/app_testing/grpchan/shmgrpc/shm_test.go",
@@ -32,7 +32,7 @@ func TestGrpcOverSharedMemory(t *testing.T) {
 	//Placeholder URL????
 	u, err := url.Parse(fmt.Sprintf("http://127.0.0.1:8080"))
 	if err != nil {
-		t.Fatalf("failed to parse base URL: %v", err)
+		b.Fatalf("failed to parse base URL: %v", err)
 	}
 
 	// Construct Channel with necessary parameters to talk to the Server
@@ -42,7 +42,6 @@ func TestGrpcOverSharedMemory(t *testing.T) {
 	}
 
 	// grpchantesting.RunChannelTestCases(t, &cc, true)
-	var b testing.B
-	grpchantesting.RunChannelBenchmarkCases(&b, &cc, true)
+	grpchantesting.RunChannelBenchmarkCases(b, &cc, false)
 
 }

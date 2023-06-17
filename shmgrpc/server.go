@@ -62,51 +62,62 @@ func NewServer(ShmQueueInfo QueueInfo, basePath string, opts ...ServerOption) *S
 // }
 
 func (s *Server) RegisterService(desc *grpc.ServiceDesc, svr interface{}) {
+
 	s.handlers.RegisterService(desc, svr)
 	s.unaryInterceptor = nil
 
+	var key, qid uint
+	var err error
+
 	//Instantiate queue for processing
-	key, err := ipc.Ftok(s.ShmQueueInfo.QueuePath, s.ShmQueueInfo.QueueId)
+	key, err = ipc.Ftok(s.ShmQueueInfo.QueuePath, s.ShmQueueInfo.QueueId)
 	if err != nil {
 		panic(fmt.Sprintf("SERVER: Failed to generate key: %s\n", err))
 	} else {
 		fmt.Printf("SERVER: Generate key %d\n", key)
 	}
 
-	qid, err := ipc.Msgget(key, ipc.IPC_CREAT|0666)
+	qid, err = ipc.Msgget(key, ipc.IPC_CREAT|0666)
 	if err != nil {
 		panic(fmt.Sprintf("SERVER: Failed to create ipc key %d: %s\n", key, err))
 	} else {
 		fmt.Printf("SERVER: Create ipc queue id %d\n", qid)
 	}
 
-	//Check for valid meta data message
-	msg_req_meta := &ipc.Msgbuf{
-		Mtype: s.ShmQueueInfo.QueueReqTypeMeta}
+	for {
+		//Check for valid meta data message
+		msg_req_meta := &ipc.Msgbuf{
+			Mtype: s.ShmQueueInfo.QueueReqTypeMeta}
+		//Mesrcv on response message type
+		err = ipc.Msgrcv(qid, msg_req_meta, 0)
+		if err != nil || msg_req_meta.Mtext == nil {
+			panic(fmt.Sprintf("SERVER: Failed to receive metadata message to ipc id %d: %s\n", qid, err))
+		} else {
+			// fmt.Printf("SERVER: Metadata Message %v receive to ipc id %d\n", msg_req_meta.Mtext, qid)
+		}
+		//Instantiate handling go routine
+		// func() {
 
-	//Mesrcv on response message type
-	err = ipc.Msgrcv(qid, msg_req_meta, 0)
-	if err != nil || msg_req_meta.Mtext == nil {
-		panic(fmt.Sprintf("SERVER: Failed to receive metadata message to ipc id %d: %s\n", qid, err))
-	} else {
-		fmt.Printf("SERVER: Metadata Message %v receive to ipc id %d\n", msg_req_meta.Mtext, qid)
-	}
+		//Parse bytes into object
+		var message_req_meta ShmMessage
+		json.Unmarshal(msg_req_meta.Mtext, &message_req_meta)
 
-	//Parse bytes into object
-	var message_req_meta ShmMessage
-	json.Unmarshal(msg_req_meta.Mtext, &message_req_meta)
+		fullName := message_req_meta.Method
+		strs := strings.SplitN(fullName[1:], "/", 2)
+		serviceName := strs[0]
+		methodName := strs[1]
+		clientCtx := message_req_meta.Context
+		if clientCtx == nil { // Temp in case of empty context.
+			clientCtx = context.Background()
+		}
 
-	fullName := message_req_meta.Method
-	strs := strings.SplitN(fullName[1:], "/", 2)
-	serviceName := strs[0]
-	methodName := strs[1]
-	clientCtx := message_req_meta.Context
-	if clientCtx == nil { // Temp in case of empty context.
-		clientCtx = context.Background()
-	}
+		clientCtx, cancel, err := contextFromHeaders(clientCtx, message_req_meta.Headers)
+		if err != nil {
+			// writeError(w, http.StatusBadRequest)
+			return
+		}
 
-	//Instantiate handling go routine
-	go func() {
+		defer cancel()
 
 		msg_req := &ipc.Msgbuf{
 			Mtype: s.ShmQueueInfo.QueueReqType}
@@ -115,7 +126,7 @@ func (s *Server) RegisterService(desc *grpc.ServiceDesc, svr interface{}) {
 		if err != nil {
 			panic(fmt.Sprintf("SERVER: Failed to receive message to ipc id %d: %s\n", qid, err))
 		} else {
-			fmt.Printf("SERVER: Message %v receive to ipc id %d\n", msg_req_meta.Mtext, qid)
+			// fmt.Printf("SERVER: Message %v receive to ipc id %d\n", msg_req_meta.Mtext, qid)
 		}
 
 		//Get Service Descriptor and Handler
@@ -159,10 +170,32 @@ func (s *Server) RegisterService(desc *grpc.ServiceDesc, svr interface{}) {
 			//TODO: Error code must be sent back to client
 		}
 
-		sts.GetHeaders()
-		sts.GetTrailers()
+		message_resp_meta := &ShmMessage{
+			Method:   methodName,
+			Context:  ctx,
+			Headers:  sts.GetHeaders(),
+			Trailers: sts.GetTrailers(),
+		}
 
-		serialized_payload, err := codec.Marshal(resp)
+		serialized_resp_meta, err := json.Marshal(message_resp_meta)
+		if err != nil {
+			status.Errorf(codes.Unknown, "Codec Marshalling error: %s ", err.Error())
+		}
+
+		//Construct respond buffer (this will have to change)
+		msg_resp_meta := &ipc.Msgbuf{
+			Mtype: s.ShmQueueInfo.QueueRespTypeMeta,
+			Mtext: serialized_resp_meta,
+		}
+		//Write back
+		err = ipc.Msgsnd(qid, msg_resp_meta, 0)
+		if err != nil {
+			panic(fmt.Sprintf("SERVER: Failed to send resp to ipc id %d: %s\n", qid, err))
+		} else {
+			// fmt.Printf("SERVER: Metadata Message %v send to ipc id %d\n", msg_req, qid)
+		}
+
+		serialized_resp, err := codec.Marshal(resp)
 		if err != nil {
 			status.Errorf(codes.Unknown, "Codec Marshalling error: %s ", err.Error())
 		}
@@ -170,18 +203,57 @@ func (s *Server) RegisterService(desc *grpc.ServiceDesc, svr interface{}) {
 		//Construct respond buffer (this will have to change)
 		msg_resp := &ipc.Msgbuf{
 			Mtype: s.ShmQueueInfo.QueueRespType,
-			Mtext: serialized_payload,
+			Mtext: serialized_resp,
 		}
 		//Write back
 		err = ipc.Msgsnd(qid, msg_resp, 0)
 		if err != nil {
 			panic(fmt.Sprintf("SERVER: Failed to send resp to ipc id %d: %s\n", qid, err))
 		} else {
-			fmt.Printf("SERVER: Message %v send to ipc id %d\n", msg_req, qid)
+			// fmt.Printf("SERVER: Message %v send to ipc id %d\n", msg_req, qid)
 		}
 		//We now have method name
-	}()
+		// }
+	}
 
+}
+
+// contextFromHeaders returns a child of the given context that is populated
+// using the given headers. The headers are converted to incoming metadata that
+// can be retrieved via metadata.FromIncomingContext. If the headers contain a
+// GRPC timeout, that is used to create a timeout for the returned context.
+func contextFromHeaders(parent context.Context, md metadata.MD) (context.Context, context.CancelFunc, error) {
+	cancel := func() {} // default to no-op
+
+	ctx := metadata.NewIncomingContext(parent, md)
+
+	// deadline propagation
+	// timeout := h.Get("GRPC-Timeout")
+	// if timeout != "" {
+	// 	// See GRPC wire format, "Timeout" component of request: https://grpc.io/docs/guides/wire.html#requests
+	// 	suffix := timeout[len(timeout)-1]
+	// 	if timeoutVal, err := strconv.ParseInt(timeout[:len(timeout)-1], 10, 64); err == nil {
+	// 		var unit time.Duration
+	// 		switch suffix {
+	// 		case 'H':
+	// 			unit = time.Hour
+	// 		case 'M':
+	// 			unit = time.Minute
+	// 		case 'S':
+	// 			unit = time.Second
+	// 		case 'm':
+	// 			unit = time.Millisecond
+	// 		case 'u':
+	// 			unit = time.Microsecond
+	// 		case 'n':
+	// 			unit = time.Nanosecond
+	// 		}
+	// 		if unit != 0 {
+	// 			ctx, cancel = context.WithTimeout(ctx, time.Duration(timeoutVal)*unit)
+	// 		}
+	// 	}
+	// }
+	return ctx, cancel, nil
 }
 
 // noValuesContext wraps a context but prevents access to its values. This is

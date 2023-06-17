@@ -102,6 +102,7 @@ func testUnary(t *testing.T, cli TestServiceClient) {
 		Headers:  testMdHeaders,
 		Trailers: testMdTrailers,
 	}
+
 	t.Run("success", func(t *testing.T) {
 		var hdr, tlr metadata.MD
 		req := proto.Clone(&reqPrototype).(*Message)
@@ -117,7 +118,6 @@ func testUnary(t *testing.T, cli TestServiceClient) {
 		checkMetadata(t, testMdHeaders, hdr, "header")
 		checkMetadata(t, testMdTrailers, tlr, "trailer")
 	})
-
 	t.Run("failure", func(t *testing.T) {
 		req := proto.Clone(&reqPrototype).(*Message)
 		req.Code = int32(codes.AlreadyExists)

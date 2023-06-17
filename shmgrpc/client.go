@@ -38,7 +38,7 @@ func (ch *Channel) Invoke(ctx context.Context, methodName string, req, resp inte
 	if err != nil {
 		panic(fmt.Sprintf("CLIENT: Failed to create ipc key %d: %s\n", key, err))
 	} else {
-		fmt.Printf("CLIENT: Create ipc queue id %d\n", qid)
+		// fmt.Printf("CLIENT: Create ipc queue id %d\n", qid)
 	}
 
 	//Get Call Options for
@@ -57,6 +57,8 @@ func (ch *Channel) Invoke(ctx context.Context, methodName string, req, resp inte
 	message_request_meta := &ShmMessage{
 		Method:  methodName,
 		Context: ctx,
+		Headers: headersFromContext(ctx),
+		// Trailers: ,
 	}
 	// we have the meta request
 	// Marshall to build rest of system
@@ -80,27 +82,49 @@ func (ch *Channel) Invoke(ctx context.Context, methodName string, req, resp inte
 	}
 
 	err = ipc.Msgsnd(qid, msg_req_meta, 0)
+	if err != nil {
+		panic(fmt.Sprintf("CLIENT: Failed to send message to ipc id %d: %s\n", qid, err))
+	} else {
+		// fmt.Printf("CLIENT: Metadata Message %v send to ipc id %d\n", msg_req, qid)
+	}
 	err = ipc.Msgsnd(qid, msg_req, 0)
 	if err != nil {
 		panic(fmt.Sprintf("CLIENT: Failed to send message to ipc id %d: %s\n", qid, err))
 	} else {
-		fmt.Printf("CLIENT: Message %v send to ipc id %d\n", msg_req, qid)
+		// fmt.Printf("CLIENT: Message %v send to ipc id %d\n", msg_req, qid)
 	}
 
+	//Receive metadata payload
+	msg_resp_meta := &ipc.Msgbuf{
+		Mtype: ch.ShmQueueInfo.QueueRespTypeMeta}
+
+	err = ipc.Msgrcv(qid, msg_resp_meta, 0)
+	if err != nil {
+		panic(fmt.Sprintf("CLIENT: Failed to receive meta message to ipc id %d: %s\n", qid, err))
+	} else {
+		// fmt.Printf("CLIENT: Metadata Message %v meta receive to ipc id %d\n", msg_resp_meta.Mtext, qid)
+	}
+
+	//Parse bytes into object
+	var message_resp_meta ShmMessage
+	json.Unmarshal(msg_resp_meta.Mtext, &message_resp_meta)
+
+	copts.SetHeaders(message_resp_meta.Headers)
+	copts.SetTrailers(message_resp_meta.Trailers)
+
 	//Construct receive buffer (this will have to change)
-	msg_rep := &ipc.Msgbuf{
+	msg_resp := &ipc.Msgbuf{
 		Mtype: ch.ShmQueueInfo.QueueRespType}
 
-	err = ipc.Msgrcv(qid, msg_rep, 0)
-
+	err = ipc.Msgrcv(qid, msg_resp, 0)
 	if err != nil {
 		panic(fmt.Sprintf("CLIENT: Failed to receive message to ipc id %d: %s\n", qid, err))
 	} else {
-		fmt.Printf("CLIENT: Message %v receive to ipc id %d\n", msg_rep.Mtext, qid)
+		// fmt.Printf("CLIENT: Message %v receive to ipc id %d\n", msg_resp.Mtext, qid)
 	}
-	// ipc.Msgctl(qid, ipc.IPC_RMID)
 
-	return codec.Unmarshal(msg_rep.Mtext, resp)
+	// ipc.Msgctl(qid, ipc.IPC_RMID)
+	return codec.Unmarshal(msg_resp.Mtext, resp)
 }
 
 func (ch *Channel) NewStream(ctx context.Context, desc *grpc.StreamDesc, methodName string, opts ...grpc.CallOption) (grpc.ClientStream, error) {
