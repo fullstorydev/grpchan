@@ -22,7 +22,7 @@ func TestGrpcOverSharedMemory(t *testing.T) {
 
 	// svr := &grpchantesting.TestServer{}
 	svc := &grpchantesting.TestServer{}
-	svr := shmgrpc.NewServer(qi, "/")
+	svr := shmgrpc.NewServer(&qi, "/")
 
 	//Register Server and instantiate with necessary information
 	//Server can create queue
@@ -38,11 +38,8 @@ func TestGrpcOverSharedMemory(t *testing.T) {
 	// Construct Channel with necessary parameters to talk to the Server
 	cc := shmgrpc.Channel{
 		BaseURL:      u,
-		ShmQueueInfo: qi,
+		ShmQueueInfo: &qi,
 	}
 
-	// grpchantesting.RunChannelTestCases(t, &cc, true)
-	var b testing.B
-	grpchantesting.RunChannelBenchmarkCases(&b, &cc, true)
-
+	grpchantesting.RunChannelTestCases(t, &cc, true)
 }

@@ -24,7 +24,7 @@ import (
 type Server struct {
 	handlers         grpchan.HandlerMap
 	basePath         string
-	ShmQueueInfo     QueueInfo
+	ShmQueueInfo     *QueueInfo
 	opts             handlerOpts
 	unaryInterceptor grpc.UnaryServerInterceptor
 }
@@ -46,11 +46,32 @@ type handlerOpts struct {
 	errFunc func(context.Context, *status.Status, http.ResponseWriter)
 }
 
-func NewServer(ShmQueueInfo QueueInfo, basePath string, opts ...ServerOption) *Server {
+func NewServer(ShmQueueInfo *QueueInfo, basePath string, opts ...ServerOption) *Server {
 	var s Server
 	s.basePath = basePath
 	s.handlers = grpchan.HandlerMap{}
 	s.ShmQueueInfo = ShmQueueInfo
+
+	var key, qid uint
+	var err error
+
+	//Instantiate queue for processing
+	key, err = ipc.Ftok(s.ShmQueueInfo.QueuePath, s.ShmQueueInfo.QueueId)
+	if err != nil {
+		panic(fmt.Sprintf("SERVER: Failed to generate key: %s\n", err))
+	} else {
+		// fmt.Printf("SERVER: Generate key %d\n", key)
+	}
+
+	qid, err = ipc.Msgget(key, ipc.IPC_CREAT|0666)
+	if err != nil {
+		panic(fmt.Sprintf("SERVER: Failed to create ipc key %d: %s\n", key, err))
+	} else {
+		// fmt.Printf("SERVER: Create ipc queue id %d\n", qid)
+	}
+
+	s.ShmQueueInfo.Qid = qid
+
 	return &s
 }
 
@@ -66,41 +87,25 @@ func (s *Server) RegisterService(desc *grpc.ServiceDesc, svr interface{}) {
 	s.handlers.RegisterService(desc, svr)
 	s.unaryInterceptor = nil
 
-	var key, qid uint
-	var err error
-
-	//Instantiate queue for processing
-	key, err = ipc.Ftok(s.ShmQueueInfo.QueuePath, s.ShmQueueInfo.QueueId)
-	if err != nil {
-		panic(fmt.Sprintf("SERVER: Failed to generate key: %s\n", err))
-	} else {
-		fmt.Printf("SERVER: Generate key %d\n", key)
-	}
-
-	qid, err = ipc.Msgget(key, ipc.IPC_CREAT|0666)
-	if err != nil {
-		panic(fmt.Sprintf("SERVER: Failed to create ipc key %d: %s\n", key, err))
-	} else {
-		fmt.Printf("SERVER: Create ipc queue id %d\n", qid)
-	}
+	qid := s.ShmQueueInfo.Qid
 
 	for {
 		//Check for valid meta data message
-		msg_req_meta := &ipc.Msgbuf{
+		msg_req := &ipc.Msgbuf{
 			Mtype: s.ShmQueueInfo.QueueReqTypeMeta}
 		//Mesrcv on response message type
-		err = ipc.Msgrcv(qid, msg_req_meta, 0)
-		if err != nil || msg_req_meta.Mtext == nil {
+		err := ipc.Msgrcv(qid, msg_req, 0)
+		if err != nil || msg_req.Mtext == nil {
 			panic(fmt.Sprintf("SERVER: Failed to receive metadata message to ipc id %d: %s\n", qid, err))
 		} else {
-			// fmt.Printf("SERVER: Metadata Message %v receive to ipc id %d\n", msg_req_meta.Mtext, qid)
+			// fmt.Printf("SERVER: Message %v receive to ipc id %d\n", msg_req.Mtext, qid)
 		}
-		//Instantiate handling go routine
-		// func() {
 
 		//Parse bytes into object
 		var message_req_meta ShmMessage
-		json.Unmarshal(msg_req_meta.Mtext, &message_req_meta)
+		json.Unmarshal(msg_req.Mtext, &message_req_meta)
+
+		payload_buffer := []byte(message_req_meta.Payload)
 
 		fullName := message_req_meta.Method
 		strs := strings.SplitN(fullName[1:], "/", 2)
@@ -118,16 +123,6 @@ func (s *Server) RegisterService(desc *grpc.ServiceDesc, svr interface{}) {
 		}
 
 		defer cancel()
-
-		msg_req := &ipc.Msgbuf{
-			Mtype: s.ShmQueueInfo.QueueReqType}
-
-		err = ipc.Msgrcv(qid, msg_req, 0)
-		if err != nil {
-			panic(fmt.Sprintf("SERVER: Failed to receive message to ipc id %d: %s\n", qid, err))
-		} else {
-			// fmt.Printf("SERVER: Message %v receive to ipc id %d\n", msg_req_meta.Mtext, qid)
-		}
 
 		//Get Service Descriptor and Handler
 		sd, handler := s.handlers.QueryService(serviceName)
@@ -148,7 +143,7 @@ func (s *Server) RegisterService(desc *grpc.ServiceDesc, svr interface{}) {
 
 		// Function to unmarshal payload using proto
 		dec := func(msg interface{}) error {
-			val := msg_req.Mtext
+			val := payload_buffer
 			if err := codec.Unmarshal(val, msg); err != nil {
 				return status.Error(codes.InvalidArgument, err.Error())
 			}
@@ -170,39 +165,27 @@ func (s *Server) RegisterService(desc *grpc.ServiceDesc, svr interface{}) {
 			//TODO: Error code must be sent back to client
 		}
 
-		message_resp_meta := &ShmMessage{
-			Method:   methodName,
-			Context:  ctx,
-			Headers:  sts.GetHeaders(),
-			Trailers: sts.GetTrailers(),
-		}
-
-		serialized_resp_meta, err := json.Marshal(message_resp_meta)
+		resp_buffer, err := codec.Marshal(resp)
 		if err != nil {
 			status.Errorf(codes.Unknown, "Codec Marshalling error: %s ", err.Error())
 		}
 
-		//Construct respond buffer (this will have to change)
-		msg_resp_meta := &ipc.Msgbuf{
-			Mtype: s.ShmQueueInfo.QueueRespTypeMeta,
-			Mtext: serialized_resp_meta,
-		}
-		//Write back
-		err = ipc.Msgsnd(qid, msg_resp_meta, 0)
-		if err != nil {
-			panic(fmt.Sprintf("SERVER: Failed to send resp to ipc id %d: %s\n", qid, err))
-		} else {
-			// fmt.Printf("SERVER: Metadata Message %v send to ipc id %d\n", msg_req, qid)
+		message_resp := &ShmMessage{
+			Method:   methodName,
+			Context:  ctx,
+			Headers:  sts.GetHeaders(),
+			Trailers: sts.GetTrailers(),
+			Payload:  string(resp_buffer),
 		}
 
-		serialized_resp, err := codec.Marshal(resp)
+		serialized_resp, err := json.Marshal(message_resp)
 		if err != nil {
 			status.Errorf(codes.Unknown, "Codec Marshalling error: %s ", err.Error())
 		}
 
 		//Construct respond buffer (this will have to change)
 		msg_resp := &ipc.Msgbuf{
-			Mtype: s.ShmQueueInfo.QueueRespType,
+			Mtype: s.ShmQueueInfo.QueueRespTypeMeta,
 			Mtext: serialized_resp,
 		}
 		//Write back
@@ -210,10 +193,8 @@ func (s *Server) RegisterService(desc *grpc.ServiceDesc, svr interface{}) {
 		if err != nil {
 			panic(fmt.Sprintf("SERVER: Failed to send resp to ipc id %d: %s\n", qid, err))
 		} else {
-			// fmt.Printf("SERVER: Message %v send to ipc id %d\n", msg_req, qid)
+			// fmt.Printf("SERVER:Message %v send to ipc id %d\n", msg_req, qid)
 		}
-		//We now have method name
-		// }
 	}
 
 }

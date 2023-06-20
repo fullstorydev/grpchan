@@ -9,6 +9,7 @@ import (
 type QueueInfo struct {
 	QueuePath         string
 	QueueId           uint
+	Qid               uint
 	QueueReqType      uint
 	QueueReqTypeMeta  uint
 	QueueRespType     uint
@@ -22,6 +23,7 @@ type ShmMessage struct {
 	// Trailers map[string][]byte `json:"trailers,omitempty"`
 	Headers  metadata.MD `json:"headers"`
 	Trailers metadata.MD `json:"trailers"`
+	Payload  string      `json:"payload"`
 	// Payload interface{}     `protobuf:"bytes,3,opt,name=method,proto3" json:"payload"`
 }
 
