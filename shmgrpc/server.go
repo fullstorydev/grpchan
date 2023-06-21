@@ -105,7 +105,7 @@ func (s *Server) RegisterService(desc *grpc.ServiceDesc, svr interface{}) {
 		var message_req_meta ShmMessage
 		json.Unmarshal(msg_req.Mtext, &message_req_meta)
 
-		payload_buffer := []byte(message_req_meta.Payload)
+		payload_buffer := unsafeGetBytes(message_req_meta.Payload)
 
 		fullName := message_req_meta.Method
 		strs := strings.SplitN(fullName[1:], "/", 2)
@@ -175,7 +175,7 @@ func (s *Server) RegisterService(desc *grpc.ServiceDesc, svr interface{}) {
 			Context:  ctx,
 			Headers:  sts.GetHeaders(),
 			Trailers: sts.GetTrailers(),
-			Payload:  string(resp_buffer),
+			Payload:  ByteSlice2String(resp_buffer),
 		}
 
 		serialized_resp, err := json.Marshal(message_resp)

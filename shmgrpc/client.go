@@ -49,23 +49,42 @@ func (ch *Channel) Invoke(ctx context.Context, methodName string, req, resp inte
 		return err
 	}
 
-	message_request_meta := &ShmMessage{
+	message_request := &ShmMessage{
 		Method:  methodName,
 		Context: ctx,
 		Headers: headersFromContext(ctx),
-		Payload: string(temp_serialized_payload),
+		Payload: ByteSlice2String(temp_serialized_payload),
 	}
 
 	// we have the meta request
 	// Marshall to build rest of system
-	serialized_message_meta, err := json.Marshal(message_request_meta)
+	serialized_message, err := json.Marshal(message_request)
 	if err != nil {
 		return err
 	}
+
+	// //Alternative serialization
+	// alt_message := &ShmMessage{
+	// 	Method:  methodName,
+	// 	Context: ctx,
+	// 	Headers: headersFromContext(ctx),
+	// }
+
+	// // we have the meta request
+	// // Marshall to build rest of system
+	// alt_serialized, err := json.Marshal(alt_message)
+	// if err != nil {
+	// 	return err
+	// }
+
+	// final_serial := append(alt_serialized, temp_serialized_payload...)
+
+	// fmt.Println(bytes.Equal(serialized_message, final_serial)) // true
+
 	// pass into shared mem queue
 	msg_req := &ipc.Msgbuf{
 		Mtype: ch.ShmQueueInfo.QueueReqTypeMeta, //Request message type
-		Mtext: serialized_message_meta,          // Isnt this technically serialization?
+		Mtext: serialized_message,               // Isnt this technically serialization?
 	}
 
 	err = ipc.Msgsnd(qid, msg_req, 0)
@@ -89,7 +108,7 @@ func (ch *Channel) Invoke(ctx context.Context, methodName string, req, resp inte
 	//Parse bytes into object
 	var message_resp_meta ShmMessage
 	json.Unmarshal(msg_resp_meta.Mtext, &message_resp_meta)
-	payload := []byte(message_resp_meta.Payload)
+	payload := unsafeGetBytes(message_resp_meta.Payload)
 
 	copts.SetHeaders(message_resp_meta.Headers)
 	copts.SetTrailers(message_resp_meta.Trailers)
