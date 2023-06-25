@@ -22,9 +22,10 @@ type Server struct {
 	handlers         grpchan.HandlerMap
 	basePath         string
 	ShmQueueInfo     *QueueInfo
+	responseQueue    *Queue
+	requestQeuue     *Queue
 	opts             handlerOpts
 	unaryInterceptor grpc.UnaryServerInterceptor
-	detachQueue      chan bool
 	// shutdownChannel  chan bool
 }
 
@@ -50,13 +51,12 @@ func NewServer(ShmQueueInfo *QueueInfo, basePath string, opts ...ServerOption) *
 	s.basePath = basePath
 	s.handlers = grpchan.HandlerMap{}
 	s.ShmQueueInfo = ShmQueueInfo
-	s.detachQueue = make(chan bool)
 
 	//Attach to shm
 	// s.ShmQueueInfo.RequestShmaddr = AttachToShmRegion(s.ShmQueueInfo.RequestShmid, uintptr(SegFlag))
 
-	initializeQueue(ShmQueueInfo.RequestShmaddr)
-	initializeQueue(ShmQueueInfo.ResponseShmaddr)
+	s.requestQeuue = initializeQueue(ShmQueueInfo.RequestShmaddr)
+	s.responseQueue = initializeQueue(ShmQueueInfo.ResponseShmaddr)
 
 	// var key, qid uint
 	// var err error
@@ -98,7 +98,7 @@ func (s *Server) RegisterService(desc *grpc.ServiceDesc, svr interface{}) {
 
 	for {
 
-		message, err := consumeMessage(requestQueue, s.detachQueue)
+		message, err := consumeMessage(requestQueue)
 		if err != nil {
 			break
 			//the channel has been shut down
@@ -196,7 +196,7 @@ func (s *Server) RegisterService(desc *grpc.ServiceDesc, svr interface{}) {
 			Data:   data,
 		}
 
-		produceMessage(responseQueue, message_response, s.detachQueue)
+		produceMessage(responseQueue, message_response)
 	}
 
 }
@@ -205,11 +205,9 @@ func (s *Server) RegisterService(desc *grpc.ServiceDesc, svr interface{}) {
 func (s *Server) Stop() {
 	// requestQueue := GetQueue(s.ShmQueueInfo.RequestShmaddr)
 	// responseQueue := GetQueue(s.ShmQueueInfo.ResponseShmaddr)
+	StopPollingQueue(s.requestQeuue)
+	StopPollingQueue(s.responseQueue)
 
-	// requestQueue.DetachQueue <- true
-	// responseQueue.DetachQueue <- true
-
-	close(s.detachQueue)
 	// close(responseQueue.DetachQueue)
 
 }

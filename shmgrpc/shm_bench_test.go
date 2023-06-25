@@ -1,7 +1,6 @@
 package shmgrpc_test
 
 import (
-	"fmt"
 	"net/url"
 	"testing"
 
@@ -31,7 +30,7 @@ func BenchmarkGrpcOverSharedMemory(b *testing.B) {
 	go grpchantesting.RegisterTestServiceServer(svr, svc)
 
 	//Placeholder URL????
-	u, err := url.Parse(fmt.Sprintf("http://127.0.0.1:8080"))
+	u, err := url.Parse("http://127.0.0.1:8080")
 	if err != nil {
 		b.Fatalf("failed to parse base URL: %v", err)
 	}
@@ -40,14 +39,12 @@ func BenchmarkGrpcOverSharedMemory(b *testing.B) {
 	cc := shmgrpc.Channel{
 		BaseURL:      u,
 		ShmQueueInfo: &qi,
-		DetachQueue:  make(chan bool),
 	}
 
 	// grpchantesting.RunChannelTestCases(t, &cc, true)
 	grpchantesting.RunChannelBenchmarkCases(b, &cc, false)
 
 	svr.Stop()
-	close(cc.DetachQueue)
 
 	defer shmgrpc.Detach(requestShmaddr)
 	defer shmgrpc.Detach(responseShmaddr)

@@ -40,13 +40,11 @@ func TestGrpcOverSharedMemory(t *testing.T) {
 	cc := shmgrpc.Channel{
 		BaseURL:      u,
 		ShmQueueInfo: &qi,
-		DetachQueue:  make(chan bool),
 	}
 
 	grpchantesting.RunChannelTestCases(t, &cc, true)
 
 	svr.Stop()
-	close(cc.DetachQueue)
 
 	defer shmgrpc.Detach(requestShmaddr)
 	defer shmgrpc.Detach(responseShmaddr)

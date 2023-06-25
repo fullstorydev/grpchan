@@ -21,13 +21,13 @@ type Message struct {
 type Queue struct {
 	// ProducerFlag bool
 	// ConsumerFlag bool
-	mu         sync.Mutex
-	Head       int32
-	Tail       int32
-	Count      int32
-	TotalCount int32
-	BufferSize int32
-	// DetachQueue chan bool
+	mu          sync.Mutex
+	Head        int32
+	Tail        int32
+	Count       int32
+	TotalCount  int32
+	BufferSize  int32
+	StopPolling bool // DetachQueue chan bool
 }
 
 const (
@@ -59,7 +59,7 @@ const (
 
 // }
 
-func produceMessage(queuePtr *Queue, message Message, detachQueue chan bool) {
+func produceMessage(queuePtr *Queue, message Message) {
 
 	// for isFull(queuePtr) {
 	// 	// Wait for space to become available
@@ -68,8 +68,8 @@ func produceMessage(queuePtr *Queue, message Message, detachQueue chan bool) {
 	// Wait until there's space in the circular buffer
 poll:
 	for {
-		select {
-		case <-detachQueue:
+		switch {
+		case queuePtr.StopPolling:
 			return
 		default:
 			// Wait for space to become available
@@ -87,13 +87,13 @@ poll:
 
 }
 
-func consumeMessage(queuePtr *Queue, detachQueue chan bool) (Message, error) {
+func consumeMessage(queuePtr *Queue) (Message, error) {
 	var message Message
 
 poll:
 	for {
-		select {
-		case <-detachQueue:
+		switch {
+		case queuePtr.StopPolling:
 			//This might be problematic
 			message = Message{}
 			return message, errors.New("SharedMem detached")
@@ -116,16 +116,21 @@ poll:
 func initializeQueue(shmaddr uintptr) *Queue {
 	// Initialize the circular buffer structure
 	queue := Queue{
-		Head:       0,
-		Tail:       0,
-		BufferSize: QueueSize,
-		Count:      0,
-		TotalCount: 0,
+		Head:        0,
+		Tail:        0,
+		BufferSize:  QueueSize,
+		Count:       0,
+		TotalCount:  0,
+		StopPolling: false,
 	}
 	fmt.Printf("Queue size: %d\n", unsafe.Sizeof(queue))
 	queuePtr := GetQueue(shmaddr)
 	*queuePtr = queue
 	return queuePtr
+}
+
+func StopPollingQueue(queuePtr *Queue) {
+	queuePtr.StopPolling = true
 }
 
 func InitializeShmRegion(key, size, segFlag uintptr) (uintptr, uintptr) {

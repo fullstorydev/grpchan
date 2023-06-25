@@ -19,7 +19,6 @@ type Channel struct {
 	//URL of endpoint (might be useful in the future)
 	BaseURL *url.URL
 	//shm state info etc that might be needed
-	DetachQueue chan bool
 }
 
 var _ grpc.ClientConnInterface = (*Channel)(nil)
@@ -73,10 +72,10 @@ func (ch *Channel) Invoke(ctx context.Context, methodName string, req, resp inte
 	}
 
 	// pass into shared mem queue
-	produceMessage(requestQueue, message, ch.DetachQueue)
+	produceMessage(requestQueue, message)
 
 	//Receive Request
-	read_message, err := consumeMessage(responseQueue, ch.DetachQueue)
+	read_message, err := consumeMessage(responseQueue)
 	if err != nil {
 		//This should hopefully not happen
 		return err
