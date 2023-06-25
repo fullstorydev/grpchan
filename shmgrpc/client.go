@@ -12,8 +12,6 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/encoding"
 	grpcproto "google.golang.org/grpc/encoding/proto"
-
-	"github.com/siadat/ipc"
 )
 
 type Channel struct {
@@ -21,13 +19,12 @@ type Channel struct {
 	//URL of endpoint (might be useful in the future)
 	BaseURL *url.URL
 	//shm state info etc that might be needed
+	DetachQueue chan bool
 }
 
 var _ grpc.ClientConnInterface = (*Channel)(nil)
 
 func (ch *Channel) Invoke(ctx context.Context, methodName string, req, resp interface{}, opts ...grpc.CallOption) error {
-
-	qid := ch.ShmQueueInfo.Qid
 
 	//Get Call Options for
 	copts := internal.GetCallOptions(opts)
@@ -44,7 +41,7 @@ func (ch *Channel) Invoke(ctx context.Context, methodName string, req, resp inte
 
 	codec := encoding.GetCodec(grpcproto.Name)
 
-	temp_serialized_payload, err := codec.Marshal(req)
+	serialized_payload, err := codec.Marshal(req)
 	if err != nil {
 		return err
 	}
@@ -53,7 +50,7 @@ func (ch *Channel) Invoke(ctx context.Context, methodName string, req, resp inte
 		Method:  methodName,
 		Context: ctx,
 		Headers: headersFromContext(ctx),
-		Payload: ByteSlice2String(temp_serialized_payload),
+		Payload: ByteSlice2String(serialized_payload),
 	}
 
 	// we have the meta request
@@ -63,51 +60,33 @@ func (ch *Channel) Invoke(ctx context.Context, methodName string, req, resp inte
 		return err
 	}
 
-	// //Alternative serialization
-	// alt_message := &ShmMessage{
-	// 	Method:  methodName,
-	// 	Context: ctx,
-	// 	Headers: headersFromContext(ctx),
-	// }
+	//START MESSAGING
+	requestQueue := GetQueue(ch.ShmQueueInfo.RequestShmaddr)
+	responseQueue := GetQueue(ch.ShmQueueInfo.ResponseShmaddr)
 
-	// // we have the meta request
-	// // Marshall to build rest of system
-	// alt_serialized, err := json.Marshal(alt_message)
-	// if err != nil {
-	// 	return err
-	// }
+	var data [600]byte
+	len := copy(data[:], serialized_message)
 
-	// final_serial := append(alt_serialized, temp_serialized_payload...)
-
-	// fmt.Println(bytes.Equal(serialized_message, final_serial)) // true
+	message := Message{
+		Header: MessageHeader{Size: int32(len)},
+		Data:   data,
+	}
 
 	// pass into shared mem queue
-	msg_req := &ipc.Msgbuf{
-		Mtype: ch.ShmQueueInfo.QueueReqTypeMeta, //Request message type
-		Mtext: serialized_message,               // Isnt this technically serialization?
-	}
+	produceMessage(requestQueue, message, ch.DetachQueue)
 
-	err = ipc.Msgsnd(qid, msg_req, 0)
+	//Receive Request
+	read_message, err := consumeMessage(responseQueue, ch.DetachQueue)
 	if err != nil {
-		panic(fmt.Sprintf("CLIENT: Failed to send message to ipc id %d: %s\n", qid, err))
-	} else {
-		// fmt.Printf("CLIENT: Message %v send to ipc id %d\n", msg_req, qid)
-	}
-
-	//Receive metadata payload
-	msg_resp_meta := &ipc.Msgbuf{
-		Mtype: ch.ShmQueueInfo.QueueRespTypeMeta}
-
-	err = ipc.Msgrcv(qid, msg_resp_meta, 0)
-	if err != nil {
-		panic(fmt.Sprintf("CLIENT: Failed to receive meta message to ipc id %d: %s\n", qid, err))
-	} else {
-		// fmt.Printf("CLIENT: Metadata Message %v meta receive to ipc id %d\n", msg_resp_meta.Mtext, qid)
+		//This should hopefully not happen
+		return err
 	}
 
 	//Parse bytes into object
+	slice := read_message.Data[0:read_message.Header.Size]
+
 	var message_resp_meta ShmMessage
-	json.Unmarshal(msg_resp_meta.Mtext, &message_resp_meta)
+	json.Unmarshal(slice, &message_resp_meta)
 	payload := unsafeGetBytes(message_resp_meta.Payload)
 
 	copts.SetHeaders(message_resp_meta.Headers)

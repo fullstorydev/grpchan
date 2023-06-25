@@ -3,7 +3,6 @@ package shmgrpc
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"strings"
 
@@ -15,8 +14,6 @@ import (
 	grpcproto "google.golang.org/grpc/encoding/proto"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
-
-	"github.com/siadat/ipc"
 )
 
 // Server is grpc over shared memory. It
@@ -27,6 +24,8 @@ type Server struct {
 	ShmQueueInfo     *QueueInfo
 	opts             handlerOpts
 	unaryInterceptor grpc.UnaryServerInterceptor
+	detachQueue      chan bool
+	// shutdownChannel  chan bool
 }
 
 var _ grpc.ServiceRegistrar = (*Server)(nil)
@@ -51,26 +50,33 @@ func NewServer(ShmQueueInfo *QueueInfo, basePath string, opts ...ServerOption) *
 	s.basePath = basePath
 	s.handlers = grpchan.HandlerMap{}
 	s.ShmQueueInfo = ShmQueueInfo
+	s.detachQueue = make(chan bool)
 
-	var key, qid uint
-	var err error
+	//Attach to shm
+	// s.ShmQueueInfo.RequestShmaddr = AttachToShmRegion(s.ShmQueueInfo.RequestShmid, uintptr(SegFlag))
 
-	//Instantiate queue for processing
-	key, err = ipc.Ftok(s.ShmQueueInfo.QueuePath, s.ShmQueueInfo.QueueId)
-	if err != nil {
-		panic(fmt.Sprintf("SERVER: Failed to generate key: %s\n", err))
-	} else {
-		// fmt.Printf("SERVER: Generate key %d\n", key)
-	}
+	initializeQueue(ShmQueueInfo.RequestShmaddr)
+	initializeQueue(ShmQueueInfo.ResponseShmaddr)
 
-	qid, err = ipc.Msgget(key, ipc.IPC_CREAT|0666)
-	if err != nil {
-		panic(fmt.Sprintf("SERVER: Failed to create ipc key %d: %s\n", key, err))
-	} else {
-		// fmt.Printf("SERVER: Create ipc queue id %d\n", qid)
-	}
+	// var key, qid uint
+	// var err error
 
-	s.ShmQueueInfo.Qid = qid
+	// // //Instantiate queue for processing
+	// // key, err = ipc.Ftok(s.ShmQueueInfo.QueuePath, s.ShmQueueInfo.QueueId)
+	// // if err != nil {
+	// // 	panic(fmt.Sprintf("SERVER: Failed to generate key: %s\n", err))
+	// // } else {
+	// // 	// fmt.Printf("SERVER: Generate key %d\n", key)
+	// // }
+
+	// // qid, err = ipc.Msgget(key, ipc.IPC_CREAT|0666)
+	// // if err != nil {
+	// // 	panic(fmt.Sprintf("SERVER: Failed to create ipc key %d: %s\n", key, err))
+	// // } else {
+	// // 	// fmt.Printf("SERVER: Create ipc queue id %d\n", qid)
+	// // }
+
+	// // s.ShmQueueInfo.Qid = qid
 
 	return &s
 }
@@ -87,23 +93,22 @@ func (s *Server) RegisterService(desc *grpc.ServiceDesc, svr interface{}) {
 	s.handlers.RegisterService(desc, svr)
 	s.unaryInterceptor = nil
 
-	qid := s.ShmQueueInfo.Qid
+	requestQueue := GetQueue(s.ShmQueueInfo.RequestShmaddr)
+	responseQueue := GetQueue(s.ShmQueueInfo.ResponseShmaddr)
 
 	for {
-		//Check for valid meta data message
-		msg_req := &ipc.Msgbuf{
-			Mtype: s.ShmQueueInfo.QueueReqTypeMeta}
-		//Mesrcv on response message type
-		err := ipc.Msgrcv(qid, msg_req, 0)
-		if err != nil || msg_req.Mtext == nil {
-			panic(fmt.Sprintf("SERVER: Failed to receive metadata message to ipc id %d: %s\n", qid, err))
-		} else {
-			// fmt.Printf("SERVER: Message %v receive to ipc id %d\n", msg_req.Mtext, qid)
+
+		message, err := consumeMessage(requestQueue, s.detachQueue)
+		if err != nil {
+			break
+			//the channel has been shut down
 		}
+
+		slice := message.Data[0:message.Header.Size]
 
 		//Parse bytes into object
 		var message_req_meta ShmMessage
-		json.Unmarshal(msg_req.Mtext, &message_req_meta)
+		json.Unmarshal(slice, &message_req_meta)
 
 		payload_buffer := unsafeGetBytes(message_req_meta.Payload)
 
@@ -183,19 +188,29 @@ func (s *Server) RegisterService(desc *grpc.ServiceDesc, svr interface{}) {
 			status.Errorf(codes.Unknown, "Codec Marshalling error: %s ", err.Error())
 		}
 
-		//Construct respond buffer (this will have to change)
-		msg_resp := &ipc.Msgbuf{
-			Mtype: s.ShmQueueInfo.QueueRespTypeMeta,
-			Mtext: serialized_resp,
+		var data [600]byte
+		len := copy(data[:], serialized_resp)
+
+		message_response := Message{
+			Header: MessageHeader{Size: int32(len)},
+			Data:   data,
 		}
-		//Write back
-		err = ipc.Msgsnd(qid, msg_resp, 0)
-		if err != nil {
-			panic(fmt.Sprintf("SERVER: Failed to send resp to ipc id %d: %s\n", qid, err))
-		} else {
-			// fmt.Printf("SERVER:Message %v send to ipc id %d\n", msg_req, qid)
-		}
+
+		produceMessage(responseQueue, message_response, s.detachQueue)
 	}
+
+}
+
+// Shutdown the server
+func (s *Server) Stop() {
+	// requestQueue := GetQueue(s.ShmQueueInfo.RequestShmaddr)
+	// responseQueue := GetQueue(s.ShmQueueInfo.ResponseShmaddr)
+
+	// requestQueue.DetachQueue <- true
+	// responseQueue.DetachQueue <- true
+
+	close(s.detachQueue)
+	// close(responseQueue.DetachQueue)
 
 }
 

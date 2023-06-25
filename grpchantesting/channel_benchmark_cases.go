@@ -38,21 +38,24 @@ func BenchmarkUnaryLatency(b *testing.B, cli TestServiceClient) {
 
 	var hdr, tlr metadata.MD
 	req := proto.Clone(&reqPrototype).(*Message)
+	// b.Run("success", func(b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		b.Run("success", func(b *testing.B) {
-			rsp, err := cli.Unary(ctx, req, grpc.Header(&hdr), grpc.Trailer(&tlr))
-			if err != nil {
-				b.Fatalf("RPC failed: %v", err)
-			}
-			if !bytes.Equal(testPayload, rsp.Payload) {
-				b.Fatalf("wrong payload returned: expecting %v; got %v", testPayload, rsp.Payload)
-			}
-			checkRequestHeadersBench(b, testOutgoingMd, rsp.Headers)
+		// b.StartTimer()
+		rsp, err := cli.Unary(ctx, req, grpc.Header(&hdr), grpc.Trailer(&tlr))
+		// b.StopTimer()
+		if err != nil {
+			b.Fatalf("RPC failed: %v", err)
+		}
+		if !bytes.Equal(testPayload, rsp.Payload) {
+			b.Fatalf("wrong payload returned: expecting %v; got %v", testPayload, rsp.Payload)
+		}
+		checkRequestHeadersBench(b, testOutgoingMd, rsp.Headers)
 
-			checkMetadataBench(b, testMdHeaders, hdr, "header")
-			checkMetadataBench(b, testMdTrailers, tlr, "trailer")
-		})
+		checkMetadataBench(b, testMdHeaders, hdr, "header")
+		checkMetadataBench(b, testMdTrailers, tlr, "trailer")
+
 	}
+	// })
 
 }
 

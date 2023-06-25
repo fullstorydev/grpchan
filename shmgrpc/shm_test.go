@@ -11,13 +11,14 @@ import (
 
 func TestGrpcOverSharedMemory(t *testing.T) {
 
+	requestShmid, requestShmaddr := shmgrpc.InitializeShmRegion(shmgrpc.RequestKey, shmgrpc.Size, uintptr(shmgrpc.SegFlag))
+	responseShmid, responseShmaddr := shmgrpc.InitializeShmRegion(shmgrpc.ResponseKey, shmgrpc.Size, uintptr(shmgrpc.SegFlag))
+
 	qi := shmgrpc.QueueInfo{
-		QueuePath:         "/Users/estebanramos/projects/microservices_work/app_testing/grpchan/shmgrpc/shm_test.go",
-		QueueId:           42,
-		QueueReqType:      2,
-		QueueReqTypeMeta:  1,
-		QueueRespType:     4,
-		QueueRespTypeMeta: 3,
+		RequestShmid:    requestShmid,
+		RequestShmaddr:  requestShmaddr,
+		ResponseShmid:   responseShmid,
+		ResponseShmaddr: responseShmaddr,
 	}
 
 	// svr := &grpchantesting.TestServer{}
@@ -39,7 +40,17 @@ func TestGrpcOverSharedMemory(t *testing.T) {
 	cc := shmgrpc.Channel{
 		BaseURL:      u,
 		ShmQueueInfo: &qi,
+		DetachQueue:  make(chan bool),
 	}
 
 	grpchantesting.RunChannelTestCases(t, &cc, true)
+
+	svr.Stop()
+	close(cc.DetachQueue)
+
+	defer shmgrpc.Detach(requestShmaddr)
+	defer shmgrpc.Detach(responseShmaddr)
+
+	defer shmgrpc.Remove(requestShmid)
+	defer shmgrpc.Remove(responseShmid)
 }

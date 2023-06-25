@@ -20,16 +20,6 @@ func BenchmarkGrpcOverSharedMemory(b *testing.B) {
 		ResponseShmid:   responseShmid,
 		ResponseShmaddr: responseShmaddr,
 	}
-
-	// svr := &grpchantesting.TestServer{}
-	svc := &grpchantesting.TestServer{}
-	svr := shmgrpc.NewServer(&qi, "/")
-
-	//Register Server and instantiate with necessary information
-	//Server can create queue
-	//Server Can have
-	go grpchantesting.RegisterTestServiceServer(svr, svc)
-
 	//Placeholder URL????
 	u, err := url.Parse(fmt.Sprintf("http://127.0.0.1:8080"))
 	if err != nil {
@@ -46,7 +36,6 @@ func BenchmarkGrpcOverSharedMemory(b *testing.B) {
 	// grpchantesting.RunChannelTestCases(t, &cc, true)
 	grpchantesting.RunChannelBenchmarkCases(b, &cc, false)
 
-	svr.Stop()
 	close(cc.DetachQueue)
 
 	defer shmgrpc.Detach(requestShmaddr)
@@ -54,4 +43,5 @@ func BenchmarkGrpcOverSharedMemory(b *testing.B) {
 
 	defer shmgrpc.Remove(requestShmid)
 	defer shmgrpc.Remove(responseShmid)
+
 }
