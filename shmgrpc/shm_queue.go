@@ -4,7 +4,6 @@ import (
 	"errors"
 	"os"
 	"syscall"
-	"time"
 	"unsafe"
 )
 
@@ -74,7 +73,7 @@ poll:
 		default:
 			// Wait for space to become available
 			if isFull(queuePtr) {
-				time.Sleep(1 * time.Nanosecond)
+				// time.Sleep(1 * time.Nanosecond)
 				continue
 			}
 			break poll
@@ -101,7 +100,7 @@ poll:
 		default:
 			// Wait for space to become available
 			if isEmpty(queuePtr) {
-				time.Sleep(1 * time.Nanosecond)
+				// time.Sleep(time.Nanosecond
 				continue
 			} else {
 				// Dequeue the message from the circular buffer

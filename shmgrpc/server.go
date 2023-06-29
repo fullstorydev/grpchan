@@ -37,6 +37,9 @@ var (
 	sSerRespData    [600]byte
 	sSerRespLen     int
 	sSerRespWritten bool = false
+
+	sserPayload        []byte
+	sserPayloadWritten bool = false
 )
 
 // ServerOption is an option used when constructing a NewServer.
@@ -65,8 +68,6 @@ func NewServer(ShmQueueInfo *QueueInfo, basePath string, opts ...ServerOption) *
 
 	s.requestQeuue = initializeQueue(ShmQueueInfo.RequestShmaddr)
 	s.responseQueue = initializeQueue(ShmQueueInfo.ResponseShmaddr)
-
-	
 
 	// var key, qid uint
 	// var err error
@@ -190,7 +191,17 @@ func (s *Server) RegisterService(desc *grpc.ServiceDesc, svr interface{}) {
 			//TODO: Error code must be sent back to client
 		}
 
-		resp_buffer, err := codec.Marshal(resp)
+		var resp_buffer []byte
+		if !sserPayloadWritten {
+			resp_buffer, err := codec.Marshal(resp)
+			if err != nil {
+				// return err
+			}
+			sserPayload = resp_buffer
+			sserPayloadWritten = true
+		}
+
+		resp_buffer = sserPayload
 		if err != nil {
 			status.Errorf(codes.Unknown, "Codec Marshalling error: %s ", err.Error())
 		}
@@ -223,6 +234,13 @@ func (s *Server) RegisterService(desc *grpc.ServiceDesc, svr interface{}) {
 		}
 
 		produceMessage(responseQueue, message_response)
+
+		if !SERIALIZATION {
+			sSerReqWritten = false
+			sSerRespWritten = false
+
+		}
+
 	}
 
 }
