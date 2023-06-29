@@ -2,10 +2,9 @@ package shmgrpc
 
 import (
 	"errors"
-	"fmt"
 	"os"
-	"sync"
 	"syscall"
+	"time"
 	"unsafe"
 )
 
@@ -21,7 +20,7 @@ type Message struct {
 type Queue struct {
 	// ProducerFlag bool
 	// ConsumerFlag bool
-	mu          sync.Mutex
+	// mu          sync.Mutex
 	Head        int32
 	Tail        int32
 	Count       int32
@@ -31,13 +30,14 @@ type Queue struct {
 }
 
 const (
-	RequestKey  = 1234  // Shared memory key
-	ResponseKey = 1235  // Shared memory key
-	Mode        = 0644  // Permissions for shared memory
-	Size        = 16384 //+ 40 // Shared memory size
-	SegFlag     = IPC_CREAT | IPC_EXCL | Mode
-	MessageSize = unsafe.Sizeof(Message{})
-	QueueSize   = int32(Size) / int32(MessageSize)
+	RequestKey    = 1234  // Shared memory key
+	ResponseKey   = 1235  // Shared memory key
+	Mode          = 0644  // Permissions for shared memory
+	Size          = 16384 //+ 40 // Shared memory size
+	ServerSegFlag = IPC_CREAT | IPC_EXCL | Mode
+	ClientSegFlag = IPC_CREAT | Mode
+	MessageSize   = unsafe.Sizeof(Message{})
+	QueueSize     = int32(Size) / int32(MessageSize)
 )
 
 // func main() {
@@ -74,6 +74,7 @@ poll:
 		default:
 			// Wait for space to become available
 			if isFull(queuePtr) {
+				time.Sleep(1 * time.Nanosecond)
 				continue
 			}
 			break poll
@@ -100,6 +101,7 @@ poll:
 		default:
 			// Wait for space to become available
 			if isEmpty(queuePtr) {
+				time.Sleep(1 * time.Nanosecond)
 				continue
 			} else {
 				// Dequeue the message from the circular buffer
@@ -123,7 +125,7 @@ func initializeQueue(shmaddr uintptr) *Queue {
 		TotalCount:  0,
 		StopPolling: false,
 	}
-	fmt.Printf("Queue size: %d\n", unsafe.Sizeof(queue))
+	// fmt.Printf("Queue size: %d\n", unsafe.Sizeof(queue))
 	queuePtr := GetQueue(shmaddr)
 	*queuePtr = queue
 	return queuePtr

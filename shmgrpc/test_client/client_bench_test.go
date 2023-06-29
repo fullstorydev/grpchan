@@ -11,8 +11,8 @@ import (
 
 func BenchmarkGrpcOverSharedMemory(b *testing.B) {
 
-	requestShmid, requestShmaddr := shmgrpc.InitializeShmRegion(shmgrpc.RequestKey, shmgrpc.Size, uintptr(shmgrpc.SegFlag))
-	responseShmid, responseShmaddr := shmgrpc.InitializeShmRegion(shmgrpc.ResponseKey, shmgrpc.Size, uintptr(shmgrpc.SegFlag))
+	requestShmid, requestShmaddr := shmgrpc.InitializeShmRegion(shmgrpc.RequestKey, shmgrpc.Size, uintptr(shmgrpc.ClientSegFlag))
+	responseShmid, responseShmaddr := shmgrpc.InitializeShmRegion(shmgrpc.ResponseKey, shmgrpc.Size, uintptr(shmgrpc.ClientSegFlag))
 
 	qi := shmgrpc.QueueInfo{
 		RequestShmid:    requestShmid,
@@ -30,18 +30,15 @@ func BenchmarkGrpcOverSharedMemory(b *testing.B) {
 	cc := shmgrpc.Channel{
 		BaseURL:      u,
 		ShmQueueInfo: &qi,
-		DetachQueue:  make(chan bool),
 	}
 
 	// grpchantesting.RunChannelTestCases(t, &cc, true)
 	grpchantesting.RunChannelBenchmarkCases(b, &cc, false)
 
-	close(cc.DetachQueue)
+	defer shmgrpc.StopPollingQueue(shmgrpc.GetQueue(requestShmaddr))
+	defer shmgrpc.StopPollingQueue(shmgrpc.GetQueue(responseShmaddr))
 
 	defer shmgrpc.Detach(requestShmaddr)
 	defer shmgrpc.Detach(responseShmaddr)
-
-	defer shmgrpc.Remove(requestShmid)
-	defer shmgrpc.Remove(responseShmid)
 
 }

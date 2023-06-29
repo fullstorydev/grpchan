@@ -7,8 +7,8 @@ import (
 
 func main() {
 
-	requestShmid, requestShmaddr := shmgrpc.InitializeShmRegion(shmgrpc.RequestKey, shmgrpc.Size, uintptr(shmgrpc.SegFlag))
-	responseShmid, responseShmaddr := shmgrpc.InitializeShmRegion(shmgrpc.ResponseKey, shmgrpc.Size, uintptr(shmgrpc.SegFlag))
+	requestShmid, requestShmaddr := shmgrpc.InitializeShmRegion(shmgrpc.RequestKey, shmgrpc.Size, uintptr(shmgrpc.ServerSegFlag))
+	responseShmid, responseShmaddr := shmgrpc.InitializeShmRegion(shmgrpc.ResponseKey, shmgrpc.Size, uintptr(shmgrpc.ServerSegFlag))
 
 	qi := shmgrpc.QueueInfo{
 		RequestShmid:    requestShmid,
@@ -24,5 +24,13 @@ func main() {
 	//Server can create queue
 	//Server Can have
 	grpchantesting.RegisterTestServiceServer(svr, svc)
+
+	defer svr.Stop()
+
+	defer shmgrpc.Detach(requestShmaddr)
+	defer shmgrpc.Detach(responseShmaddr)
+
+	defer shmgrpc.Remove(requestShmid)
+	defer shmgrpc.Remove(responseShmid)
 
 }

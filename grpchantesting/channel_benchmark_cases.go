@@ -3,8 +3,10 @@ package grpchantesting
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"testing"
 
+	"github.com/loov/hrtime"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
@@ -24,8 +26,42 @@ import (
 func RunChannelBenchmarkCases(b *testing.B, ch grpc.ClientConnInterface, supportsFullDuplex bool) {
 	cli := NewTestServiceClient(ch)
 
-	b.Run("unary_latency_stats", func(b *testing.B) { BenchmarkUnaryLatency(b, cli) })
+	// b.Run("unary_latency_stats", func(b *testing.B) { BenchmarkUnaryLatency(b, cli) })
 
+	b.Run("unary_latency_histogram", func(b *testing.B) { BenchmarkHistogramUnaryLatency(b, cli) })
+}
+
+func BenchmarkHistogramUnaryLatency(b *testing.B, cli TestServiceClient) {
+	// bench := hrtesting.NewBenchmark(b)
+	bench := hrtime.NewBenchmark(100000)
+	// defer bench.Report()
+
+	ctx := metadata.NewOutgoingContext(context.Background(), MetadataNew(testOutgoingMd))
+
+	reqPrototype := Message{
+		Payload:  testPayload,
+		Headers:  testMdHeaders,
+		Trailers: testMdTrailers,
+	}
+
+	var hdr, tlr metadata.MD
+	req := proto.Clone(&reqPrototype).(*Message)
+	for bench.Next() {
+		rsp, err := cli.Unary(ctx, req, grpc.Header(&hdr), grpc.Trailer(&tlr))
+		// b.StopTimer()
+		if err != nil {
+			b.Fatalf("RPC failed: %v", err)
+		}
+		if !bytes.Equal(testPayload, rsp.Payload) {
+			b.Fatalf("wrong payload returned: expecting %v; got %v", testPayload, rsp.Payload)
+		}
+		checkRequestHeadersBench(b, testOutgoingMd, rsp.Headers)
+
+		checkMetadataBench(b, testMdHeaders, hdr, "header")
+		checkMetadataBench(b, testMdTrailers, tlr, "trailer")
+
+	}
+	fmt.Println(bench.Histogram(10))
 }
 
 func BenchmarkUnaryLatency(b *testing.B, cli TestServiceClient) {
@@ -56,7 +92,6 @@ func BenchmarkUnaryLatency(b *testing.B, cli TestServiceClient) {
 
 	}
 	// })
-
 }
 
 func checkRequestHeadersBench(b *testing.B, expected, actual map[string][]byte) {
