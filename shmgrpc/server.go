@@ -31,6 +31,14 @@ type Server struct {
 
 var _ grpc.ServiceRegistrar = (*Server)(nil)
 
+var (
+	sSerReqStruct   ShmMessage
+	sSerReqWritten  bool = false
+	sSerRespData    [600]byte
+	sSerRespLen     int
+	sSerRespWritten bool = false
+)
+
 // ServerOption is an option used when constructing a NewServer.
 type ServerOption interface {
 	apply(*Server)
@@ -57,6 +65,8 @@ func NewServer(ShmQueueInfo *QueueInfo, basePath string, opts ...ServerOption) *
 
 	s.requestQeuue = initializeQueue(ShmQueueInfo.RequestShmaddr)
 	s.responseQueue = initializeQueue(ShmQueueInfo.ResponseShmaddr)
+
+	
 
 	// var key, qid uint
 	// var err error
@@ -105,10 +115,20 @@ func (s *Server) RegisterService(desc *grpc.ServiceDesc, svr interface{}) {
 		}
 
 		slice := message.Data[0:message.Header.Size]
+		var message_req_meta ShmMessage
+		if !sSerReqWritten {
+			json.Unmarshal(slice, &message_req_meta)
+			sSerReqStruct = message_req_meta
+			sSerReqWritten = true
+			if err != nil {
+				// return err
+				status.Errorf(codes.Unknown, "Codec Marshalling error: %s ", err.Error())
+			}
+		} else {
+			message_req_meta = sSerReqStruct
+		}
 
 		//Parse bytes into object
-		var message_req_meta ShmMessage
-		json.Unmarshal(slice, &message_req_meta)
 
 		payload_buffer := unsafeGetBytes(message_req_meta.Payload)
 
@@ -183,16 +203,22 @@ func (s *Server) RegisterService(desc *grpc.ServiceDesc, svr interface{}) {
 			Payload:  ByteSlice2String(resp_buffer),
 		}
 
-		serialized_resp, err := json.Marshal(message_resp)
-		if err != nil {
-			status.Errorf(codes.Unknown, "Codec Marshalling error: %s ", err.Error())
+		var serializedMessage []byte
+		var data [600]byte
+		if !sSerRespWritten {
+			serializedMessage, err = json.Marshal(message_resp)
+			sSerRespLen = copy(sSerRespData[:], serializedMessage)
+			data = sSerRespData
+			sSerRespWritten = true
+			if err != nil {
+				status.Errorf(codes.Unknown, "Codec Marshalling error: %s ", err.Error())
+			}
+		} else {
+			data = sSerRespData
 		}
 
-		var data [600]byte
-		len := copy(data[:], serialized_resp)
-
 		message_response := Message{
-			Header: MessageHeader{Size: int32(len)},
+			Header: MessageHeader{Size: int32(sSerRespLen)},
 			Data:   data,
 		}
 
