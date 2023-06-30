@@ -141,7 +141,7 @@ func (ch *Channel) Invoke(ctx context.Context, methodName string, req, resp inte
 	// }
 	// resp = cserPayloadResp
 
-	if !SERIALIZATION {
+	if !NO_SERIALIZATION {
 		cserReqWritten = false
 		cserRespWritten = false
 		cserPayloadWritten = false

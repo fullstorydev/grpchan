@@ -235,7 +235,7 @@ func (s *Server) RegisterService(desc *grpc.ServiceDesc, svr interface{}) {
 
 		produceMessage(responseQueue, message_response)
 
-		if !SERIALIZATION {
+		if !NO_SERIALIZATION {
 			sSerReqWritten = false
 			sSerRespWritten = false
 

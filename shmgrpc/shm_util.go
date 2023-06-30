@@ -20,7 +20,7 @@ type Flag int
 // https://github.com/torvalds/linux/blob/master/include/uapi/linux/ipc.h
 const (
 	// Disable Serialization
-	SERIALIZATION bool = false
+	NO_SERIALIZATION bool = false
 
 	/* resource get request flags */
 	IPC_CREAT  Flag = 00001000 /* create if key is nonexistent */
