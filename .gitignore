@@ -1,1 +1,4 @@
 .idea/
+*.txt
+*.out
+*.test
