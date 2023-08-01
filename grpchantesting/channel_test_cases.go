@@ -3,6 +3,7 @@ package grpchantesting
 import (
 	"bytes"
 	"context"
+	"flag"
 	"io"
 	"strings"
 	"testing"
@@ -28,13 +29,38 @@ import (
 // *testing.T.
 func RunChannelTestCases(t *testing.T, ch grpc.ClientConnInterface, supportsFullDuplex bool) {
 	cli := NewTestServiceClient(ch)
-	t.Run("unary", func(t *testing.T) { testUnary(t, cli) })
+
+	t.Run("hello", func(t *testing.T) { testHello(t, cli) })
+	// t.Run("unary", func(t *testing.T) { testUnary(t, cli) })
 	// t.Run("client-stream", func(t *testing.T) { testClientStream(t, cli) })
 	// t.Run("server-stream", func(t *testing.T) { testServerStream(t, cli) })
 	// t.Run("half-duplex bidi-stream", func(t *testing.T) { testHalfDuplexBidiStream(t, cli) })
 	// if supportsFullDuplex {
 	// 	t.Run("full-duplex bidi-stream", func(t *testing.T) { testFullDuplexBidiStream(t, cli) })
 	// }
+}
+
+const (
+	defaultName = "world"
+)
+
+func testHello(t *testing.T, cli TestServiceClient) {
+	ctx := metadata.NewOutgoingContext(context.Background(), MetadataNew(testOutgoingMd))
+
+	name := flag.String("name", defaultName, "Name to greet")
+
+	t.Run("success", func(t *testing.T) {
+		req := &HelloRequest{Name: *name}
+		rsp, err := cli.SayHello(ctx, req)
+		if err != nil {
+			t.Fatalf("RPC failed: %v", err)
+		}
+		if !bytes.Equal([]byte("Hello world"), []byte(rsp.GetMessage())) {
+			t.Fatalf("wrong payload returned: expecting %v; got %v", testPayload, rsp.GetMessage())
+		}
+
+	})
+
 }
 
 var (

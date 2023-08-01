@@ -9,6 +9,7 @@ option go_package = ".;grpchantesting";
 
 service TestService {
 	rpc Unary (Message) returns (Message);
+	rpc SayHello (HelloRequest) returns (HelloReply);
 	rpc ClientStream (stream Message) returns (Message);
 	rpc ServerStream (Message) returns (stream Message);
 	rpc BidiStream (stream Message) returns (stream Message);
@@ -25,4 +26,13 @@ message Message {
 	map<string, bytes> headers = 5;
 	map<string, bytes> trailers = 6;
 	repeated google.protobuf.Any error_details = 7;
+}
+
+
+message HelloRequest {
+	string name = 1; 
+}
+
+message HelloReply {
+	string message = 1;
 }

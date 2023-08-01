@@ -19,6 +19,11 @@ type TestServer struct {
 	UnimplementedTestServiceServer
 }
 
+func (s *TestServer) SayHello(ctx context.Context, in *HelloRequest) (*HelloReply, error) {
+	// log.Printf("Received: %v", in.GetName())
+	return &HelloReply{Message: "Hello " + in.GetName()}, nil
+}
+
 // Unary implements the TestService server interface.
 func (s *TestServer) Unary(ctx context.Context, req *Message) (*Message, error) {
 	if req.DelayMillis > 0 {
