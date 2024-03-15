@@ -270,6 +270,7 @@ func TestInterceptServerStream(t *testing.T) {
 }
 
 func checkProtosEqual(t *testing.T, expected, actual []proto.Message) {
+	t.Helper()
 	if len(actual) != len(expected) {
 		t.Fatalf("unexpected number of replies: expecting %d; got %d", len(expected), len(actual))
 	}
@@ -281,6 +282,7 @@ func checkProtosEqual(t *testing.T, expected, actual []proto.Message) {
 }
 
 func checkCalls(t *testing.T, expected, actual []*call) {
+	t.Helper()
 	if len(actual) != len(expected) {
 		t.Fatalf("unexpected number of calls: expecting %d; got %d", len(expected), len(actual))
 	}
