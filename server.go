@@ -81,22 +81,21 @@ func (m HandlerMap) GetServiceInfo() map[string]grpc.ServiceInfo {
 // can easily expose the same services and handlers via multiple channels after
 // registering the handlers once, with the map:
 //
-//    // Register all handlers once with the map:
-//    reg := channel.HandlerMap{}
-//    // (these registration functions are generated)
-//    foo.RegisterHandlerFooBar(newFooBarImpl())
-//    fu.RegisterHandlerFuBaz(newFuBazImpl())
+//	// Register all handlers once with the map:
+//	reg := channel.HandlerMap{}
+//	// (these registration functions are generated)
+//	foo.RegisterHandlerFooBar(newFooBarImpl())
+//	fu.RegisterHandlerFuBaz(newFuBazImpl())
 //
-//    // Now we can re-use these handlers for multiple channels:
-//    //   Normal gRPC
-//    svr := grpc.NewServer()
-//    reg.ForEach(svr.RegisterService)
-//    //   In-process
-//    ipch := &inprocgrpc.Channel{}
-//    reg.ForEach(ipch.RegisterService)
-//    //   And HTTP 1.1
-//    httpgrpc.HandleServices(http.HandleFunc, "/rpc/", reg, nil, nil)
-//
+//	// Now we can re-use these handlers for multiple channels:
+//	//   Normal gRPC
+//	svr := grpc.NewServer()
+//	reg.ForEach(svr.RegisterService)
+//	//   In-process
+//	ipch := &inprocgrpc.Channel{}
+//	reg.ForEach(ipch.RegisterService)
+//	//   And HTTP 1.1
+//	httpgrpc.HandleServices(http.HandleFunc, "/rpc/", reg, nil, nil)
 func (m HandlerMap) ForEach(fn func(desc *grpc.ServiceDesc, svr interface{})) {
 	for _, svc := range m {
 		fn(svc.desc, svc.handler)

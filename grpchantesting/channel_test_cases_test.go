@@ -2,6 +2,7 @@ package grpchantesting
 
 import (
 	"context"
+	"google.golang.org/grpc/credentials/insecure"
 	"net"
 	"testing"
 	"time"
@@ -27,7 +28,7 @@ func TestChannelTestCases(t *testing.T) {
 	defer cancel()
 
 	addr := l.Addr().String()
-	cc, err := grpc.DialContext(ctx, addr, grpc.WithInsecure(), grpc.WithBlock(), grpc.FailOnNonTempDialError(true))
+	cc, err := grpc.DialContext(ctx, addr, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithBlock(), grpc.FailOnNonTempDialError(true))
 	if err != nil {
 		t.Fatalf("failed to dial address: %s", addr)
 	}
