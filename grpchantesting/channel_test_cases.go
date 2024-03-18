@@ -660,6 +660,7 @@ func testFullDuplexBidiStream(t *testing.T, cli TestServiceClient) {
 }
 
 func checkRequestHeaders(t *testing.T, expected, actual map[string][]byte) {
+	t.Helper()
 	// we don't just do a strict equals check because the actual headers
 	// echoed back could have extra headers that were added implicitly
 	// by the GRPC-over-HTTP client (such as GRPC-Timeout, Content-Type, etc).
@@ -672,11 +673,13 @@ func checkRequestHeaders(t *testing.T, expected, actual map[string][]byte) {
 }
 
 func checkResponseMetadata(t *testing.T, cs grpc.ClientStream, hdrs map[string][]byte, tlrs map[string][]byte) {
+	t.Helper()
 	checkResponseHeaders(t, cs, hdrs)
 	checkResponseTrailers(t, cs, tlrs)
 }
 
 func checkResponseHeaders(t *testing.T, cs grpc.ClientStream, md map[string][]byte) {
+	t.Helper()
 	h, err := cs.Header()
 	if err != nil {
 		t.Fatalf("failed to get header metadata: %v", err)
@@ -685,10 +688,13 @@ func checkResponseHeaders(t *testing.T, cs grpc.ClientStream, md map[string][]by
 }
 
 func checkResponseTrailers(t *testing.T, cs grpc.ClientStream, md map[string][]byte) {
+	t.Helper()
 	checkMetadata(t, md, cs.Trailer(), "trailer")
 }
 
 func checkMetadata(t *testing.T, expected map[string][]byte, actual metadata.MD, name string) {
+	t.Helper()
+
 	// we don't just do a strict equals check because the actual headers
 	// echoed back could have extra headers that were added implicitly
 	// by the GRPC-over-HTTP client (such as GRPC-Timeout, Content-Type, etc).
@@ -701,6 +707,7 @@ func checkMetadata(t *testing.T, expected map[string][]byte, actual metadata.MD,
 }
 
 func checkError(t *testing.T, err error, expectedCode codes.Code, expectedDetails ...proto.Message) {
+	t.Helper()
 	st, ok := status.FromError(err)
 	if !ok {
 		t.Fatalf("wrong type of error: %v", err)

@@ -18,19 +18,19 @@
 // and use that to expose the services. The httpgrpc.NewServer route is the simplest and most
 // intuitive and really supersedes the other two options.
 //
-// Caveats
+// # Caveats
 //
 // There are couple of limitations when using this package:
-//   1. True bidi streams are not supported. The best that can be done are half-duplex
-//      bidi streams, where the client uploads its entire streaming request and then the
-//      server can reply with a streaming response. Interleaved reading and writing does
-//      not work with HTTP 1.1. (Even if there were clients that supported it, the Go HTTP
-//      server APIS do not -- once a server handler starts writing to the response body,
-//      the request body is closed and no more messages can be read from it).
-//   2. Client-side interceptors that interact with the *grpc.ClientConn, such as examining
-//      connection states or querying static method configs, will not work. No GRPC
-//      client connection is actually established and HTTP 1.1 calls will supply a nil
-//      *grpc.ClientConn to any interceptor.
+//  1. True bidi streams are not supported. The best that can be done are half-duplex
+//     bidi streams, where the client uploads its entire streaming request and then the
+//     server can reply with a streaming response. Interleaved reading and writing does
+//     not work with HTTP 1.1. (Even if there were clients that supported it, the Go HTTP
+//     server APIS do not -- once a server handler starts writing to the response body,
+//     the request body is closed and no more messages can be read from it).
+//  2. Client-side interceptors that interact with the *grpc.ClientConn, such as examining
+//     connection states or querying static method configs, will not work. No GRPC
+//     client connection is actually established and HTTP 1.1 calls will supply a nil
+//     *grpc.ClientConn to any interceptor.
 //
 // Note that for environments like Google App Engine, which do not support streaming, use
 // of streaming RPCs may result in high latency and high memory usage as entire streams must
@@ -41,7 +41,7 @@
 // server's sending of headers and the first response message will immediately close the
 // request side for reading. So later attempts to read a request message will fail.
 //
-// Anatomy of GRPC-over-HTTP
+// # Anatomy of GRPC-over-HTTP
 //
 // A unary RPC is the simplest: the request will be a POST message and the request path
 // will be the base URL's path (if any) plus "/service.name/method" (where service.name and
@@ -82,4 +82,4 @@
 // and response messages).
 package httpgrpc
 
-//go:generate protoc --go_out=. httpgrpc.proto
+//go:generate protoc --go_out=. --go_opt=paths=source_relative httpgrpc.proto

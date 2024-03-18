@@ -113,12 +113,12 @@ func TestInterceptServerUnary(t *testing.T) {
 	expected := []*call{
 		{
 			methodName: "Unary",
-			reqs:       []interface{}{&grpchantesting.Message{}},
+			reqs:       []proto.Message{&grpchantesting.Message{}},
 			headers:    nil,
 		},
 		{
 			methodName: "Unary",
-			reqs:       []interface{}{&grpchantesting.Message{Count: 456}},
+			reqs:       []proto.Message{&grpchantesting.Message{Count: 456}},
 			headers:    metadata.Pairs("foo", "bar"),
 		},
 	}
@@ -172,7 +172,7 @@ func TestInterceptServerStream(t *testing.T) {
 	svr.resp = &grpchantesting.Message{Count: 123}
 	str := &testServerStream{
 		ctx: context.Background(),
-		reqs: []interface{}{
+		reqs: []proto.Message{
 			&grpchantesting.Message{},
 			&grpchantesting.Message{Count: 1},
 			&grpchantesting.Message{Count: 42},
@@ -183,7 +183,7 @@ func TestInterceptServerStream(t *testing.T) {
 		t.Fatalf("RPC failed: %v", err)
 	}
 
-	replies := []interface{}{svr.resp}
+	replies := []proto.Message{svr.resp}
 	checkProtosEqual(t, replies, str.resps)
 
 	// server stream, success
@@ -191,7 +191,7 @@ func TestInterceptServerStream(t *testing.T) {
 	svr.respCount = 5
 	str = &testServerStream{
 		ctx: ctx,
-		reqs: []interface{}{
+		reqs: []proto.Message{
 			&grpchantesting.Message{Count: 456},
 		},
 	}
@@ -200,7 +200,7 @@ func TestInterceptServerStream(t *testing.T) {
 		t.Fatalf("RPC failed: %v", err)
 	}
 
-	replies = []interface{}{svr.resp, svr.resp, svr.resp, svr.resp, svr.resp} // five of 'em
+	replies = []proto.Message{svr.resp, svr.resp, svr.resp, svr.resp, svr.resp} // five of 'em
 	checkProtosEqual(t, replies, str.resps)
 
 	// bidi stream, failure
@@ -208,7 +208,7 @@ func TestInterceptServerStream(t *testing.T) {
 	svr.code = codes.Aborted
 	str = &testServerStream{
 		ctx: ctx,
-		reqs: []interface{}{
+		reqs: []proto.Message{
 			&grpchantesting.Message{Count: 333},
 			&grpchantesting.Message{Count: 222},
 			&grpchantesting.Message{Count: 111},
@@ -243,7 +243,7 @@ func TestInterceptServerStream(t *testing.T) {
 	expected := []*call{
 		{
 			methodName: "ClientStream",
-			reqs: []interface{}{
+			reqs: []proto.Message{
 				&grpchantesting.Message{},
 				&grpchantesting.Message{Count: 1},
 				&grpchantesting.Message{Count: 42},
@@ -252,12 +252,12 @@ func TestInterceptServerStream(t *testing.T) {
 		},
 		{
 			methodName: "ServerStream",
-			reqs:       []interface{}{&grpchantesting.Message{Count: 456}},
+			reqs:       []proto.Message{&grpchantesting.Message{Count: 456}},
 			headers:    metadata.Pairs("foo", "bar"),
 		},
 		{
 			methodName: "BidiStream",
-			reqs: []interface{}{
+			reqs: []proto.Message{
 				&grpchantesting.Message{Count: 333},
 				&grpchantesting.Message{Count: 222},
 				&grpchantesting.Message{Count: 111},
@@ -269,18 +269,20 @@ func TestInterceptServerStream(t *testing.T) {
 	checkCalls(t, expected, svr.calls)
 }
 
-func checkProtosEqual(t *testing.T, expected, actual []interface{}) {
+func checkProtosEqual(t *testing.T, expected, actual []proto.Message) {
+	t.Helper()
 	if len(actual) != len(expected) {
 		t.Fatalf("unexpected number of replies: expecting %d; got %d", len(expected), len(actual))
 	}
 	for i := range expected {
-		if !proto.Equal(expected[i].(proto.Message), actual[i].(proto.Message)) {
+		if !proto.Equal(expected[i], actual[i]) {
 			t.Fatalf("unexpected reply[%d]: expecting %v; got %v", i+1, expected[i], actual[i])
 		}
 	}
 }
 
 func checkCalls(t *testing.T, expected, actual []*call) {
+	t.Helper()
 	if len(actual) != len(expected) {
 		t.Fatalf("unexpected number of calls: expecting %d; got %d", len(expected), len(actual))
 	}
@@ -305,7 +307,7 @@ type testInterceptServerStream struct {
 func (s *testInterceptServerStream) SendMsg(m interface{}) error {
 	err := s.ServerStream.SendMsg(m)
 	if err == nil {
-		(*s.messageCount)++
+		*s.messageCount++
 	}
 	return err
 }
@@ -328,7 +330,7 @@ func (s *testInterceptServerStream) SendMsg(m interface{}) error {
 type testServer struct {
 	grpchantesting.UnimplementedTestServiceServer
 	code      codes.Code
-	resp      interface{}
+	resp      proto.Message
 	respCount int
 	headers   metadata.MD
 	trailers  metadata.MD
@@ -375,13 +377,13 @@ func (s *testServer) UseExternalMessageTwice(ctx context.Context, req *emptypb.E
 	return &resp, nil
 }
 
-func (s *testServer) unary(ctx context.Context, methodName string, req, resp interface{}) error {
+func (s *testServer) unary(ctx context.Context, methodName string, req, resp proto.Message) error {
 	headers, _ := metadata.FromIncomingContext(ctx)
 	reqClone, err := internal.CloneMessage(req)
 	if err != nil {
 		return err
 	}
-	s.calls = append(s.calls, &call{methodName: methodName, headers: headers, reqs: []interface{}{reqClone}})
+	s.calls = append(s.calls, &call{methodName: methodName, headers: headers, reqs: []proto.Message{reqClone.(proto.Message)}})
 	if s.code != codes.OK {
 		return status.Error(s.code, s.code.String())
 	}
@@ -450,8 +452,8 @@ func (s *testServer) stream(desc *grpc.StreamDesc, req *grpchantesting.Message, 
 
 type testServerStream struct {
 	ctx         context.Context
-	reqs        []interface{}
-	resps       []interface{}
+	reqs        []proto.Message
+	resps       []proto.Message
 	headers     metadata.MD
 	headersSent bool
 	trailers    metadata.MD
@@ -489,7 +491,7 @@ func (s *testServerStream) SendMsg(m interface{}) error {
 	if err != nil {
 		return err
 	}
-	s.resps = append(s.resps, mClone)
+	s.resps = append(s.resps, mClone.(proto.Message))
 	return nil
 }
 

@@ -51,7 +51,7 @@ func TestUseDynamicMessage(t *testing.T) {
 	grpchantesting.RegisterTestServiceServer(&cc, svr)
 	stub := grpcdynamic.NewStub(&cc)
 
-	fd, err := desc.LoadFileDescriptor("grpchantesting/test.proto")
+	fd, err := desc.LoadFileDescriptor("test.proto")
 	if err != nil {
 		t.Fatalf("failed to load descriptor for test.proto: %v", err)
 	}

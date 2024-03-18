@@ -5,7 +5,7 @@ import "google/protobuf/empty.proto";
 
 package grpchantesting;
 
-option go_package = ".;grpchantesting";
+option go_package = "./;grpchantesting";
 
 service TestService {
 	rpc Unary (Message) returns (Message);

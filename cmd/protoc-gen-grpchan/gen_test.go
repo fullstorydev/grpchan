@@ -8,7 +8,7 @@ import (
 
 // we use bash to mv the file after it is generated so that it will end in "_test.go"
 // (so it's just a test file and not linked into the actual protoc-gen-grpchan command)
-//go:generate bash -c "protoc gen_test.proto --go_out=./ --go-grpc_out=./ && mv ./gen_test.pb.go ./gen_test_pb_test.go && mv ./gen_test_grpc.pb.go ./gen_test_grpc_pb_test.go"
+//go:generate bash -c "protoc --go_out=. --go-grpc_out=. --go_opt=paths=source_relative gen_test.proto && mv ./gen_test.pb.go ./gen_test_pb_test.go && mv ./gen_test_grpc.pb.go ./gen_test_grpc_pb_test.go"
 
 func TestStreamOrder(t *testing.T) {
 	// we get the service descriptor (same descriptor that protoc-gen-grpchan processes

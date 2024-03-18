@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"reflect"
 	"testing"
 
 	"google.golang.org/grpc"
@@ -67,22 +66,20 @@ func TestInterceptClientConnUnary(t *testing.T) {
 		t.Fatalf("interceptor observed wrong number of failed RPCs: expecting %d, got %d", 1, failCount)
 	}
 
-	expected := []interface{}{
-		&call{
+	expected := []*call{
+		{
 			methodName: "/grpchantesting.TestService/Unary",
-			reqs:       []interface{}{&grpchantesting.Message{}},
+			reqs:       []proto.Message{&grpchantesting.Message{}},
 			headers:    nil,
 		},
-		&call{
+		{
 			methodName: "/grpchantesting.TestService/Unary",
-			reqs:       []interface{}{&grpchantesting.Message{Count: 456}},
+			reqs:       []proto.Message{&grpchantesting.Message{Count: 456}},
 			headers:    metadata.Pairs("foo", "bar"),
 		},
 	}
 
-	if !reflect.DeepEqual(tc.calls, expected) {
-		t.Fatalf("unexpected calls observed by server: expecting %#v; got %#v", expected, tc.calls)
-	}
+	checkCalls(t, expected, tc.calls)
 }
 
 func TestInterceptClientConnStream(t *testing.T) {
@@ -211,24 +208,24 @@ func TestInterceptClientConnStream(t *testing.T) {
 		t.Fatalf("interceptor observed wrong number of failed RPCs: expecting %d, got %d", 1, failCount)
 	}
 
-	expected := []interface{}{
-		&call{
+	expected := []*call{
+		{
 			methodName: "/grpchantesting.TestService/ClientStream",
-			reqs: []interface{}{
+			reqs: []proto.Message{
 				&grpchantesting.Message{},
 				&grpchantesting.Message{Count: 1},
 				&grpchantesting.Message{Count: 42},
 			},
 			headers: nil,
 		},
-		&call{
+		{
 			methodName: "/grpchantesting.TestService/ServerStream",
-			reqs:       []interface{}{&grpchantesting.Message{Count: 456}},
+			reqs:       []proto.Message{&grpchantesting.Message{Count: 456}},
 			headers:    metadata.Pairs("foo", "bar"),
 		},
-		&call{
+		{
 			methodName: "/grpchantesting.TestService/BidiStream",
-			reqs: []interface{}{
+			reqs: []proto.Message{
 				&grpchantesting.Message{Count: 333},
 				&grpchantesting.Message{Count: 222},
 				&grpchantesting.Message{Count: 111},
@@ -237,9 +234,7 @@ func TestInterceptClientConnStream(t *testing.T) {
 		},
 	}
 
-	if !reflect.DeepEqual(tc.calls, expected) {
-		t.Fatalf("unexpected calls observed by server: expecting %#v; got %#v", expected, tc.calls)
-	}
+	checkCalls(t, expected, tc.calls)
 }
 
 type testInterceptClientStream struct {
@@ -251,17 +246,17 @@ type testInterceptClientStream struct {
 func (s *testInterceptClientStream) RecvMsg(m interface{}) error {
 	err := s.ClientStream.RecvMsg(m)
 	if err == nil {
-		(*s.messageCount)++
+		*s.messageCount++
 		if !s.serverStreams {
 			s.closed = true
-			(*s.successCount)++
+			*s.successCount++
 		}
 	} else if !s.closed {
 		s.closed = true
 		if err == io.EOF {
-			(*s.successCount)++
+			*s.successCount++
 		} else {
-			(*s.failCount)++
+			*s.failCount++
 		}
 	}
 	return err
@@ -288,22 +283,22 @@ type testConn struct {
 	respCount int
 	headers   metadata.MD
 	trailers  metadata.MD
-	calls     []interface{} // elements are either *unaryCall or *streamCall
+	calls     []*call
 }
 
 type call struct {
 	methodName string
 	headers    metadata.MD
-	reqs       []interface{}
+	reqs       []proto.Message
 }
 
-func (ch *testConn) Invoke(ctx context.Context, methodName string, req, resp interface{}, opts ...grpc.CallOption) error {
+func (ch *testConn) Invoke(ctx context.Context, methodName string, req, resp interface{}, _ ...grpc.CallOption) error {
 	headers, _ := metadata.FromOutgoingContext(ctx)
 	reqClone, err := internal.CloneMessage(req)
 	if err != nil {
 		return err
 	}
-	ch.calls = append(ch.calls, &call{methodName: methodName, headers: headers, reqs: []interface{}{reqClone}})
+	ch.calls = append(ch.calls, &call{methodName: methodName, headers: headers, reqs: []proto.Message{reqClone.(proto.Message)}})
 	if ch.code != codes.OK {
 		return status.Error(ch.code, ch.code.String())
 	}
@@ -313,7 +308,7 @@ func (ch *testConn) Invoke(ctx context.Context, methodName string, req, resp int
 	return internal.ClearMessage(resp)
 }
 
-func (ch *testConn) NewStream(ctx context.Context, desc *grpc.StreamDesc, methodName string, opts ...grpc.CallOption) (grpc.ClientStream, error) {
+func (ch *testConn) NewStream(ctx context.Context, desc *grpc.StreamDesc, methodName string, _ ...grpc.CallOption) (grpc.ClientStream, error) {
 	headers, _ := metadata.FromOutgoingContext(ctx)
 	call := &call{methodName: methodName, headers: headers}
 	ch.calls = append(ch.calls, call)
@@ -379,7 +374,7 @@ func (s *testClientStream) SendMsg(m interface{}) error {
 	if err != nil {
 		return err
 	}
-	s.call.reqs = append(s.call.reqs, mClone)
+	s.call.reqs = append(s.call.reqs, mClone.(proto.Message))
 	return nil
 }
 
