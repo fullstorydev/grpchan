@@ -338,5 +338,5 @@ var TestService_ServiceDesc = grpc.ServiceDesc{
 			ClientStreams: true,
 		},
 	},
-	Metadata: "grpchantesting/test.proto",
+	Metadata: "test.proto",
 }

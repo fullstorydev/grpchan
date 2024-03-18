@@ -1,8 +1,6 @@
-# TODO: run golint and errcheck, but only to catch *new* violations and
-# decide whether to change code or not (e.g. we need to be able to whitelist
-# violations already in the code). They can be useful to catch errors, but
-# they are just too noisy to be a requirement for a CI -- we don't even *want*
-# to fix some of the things they consider to be violations.
+export PATH := $(shell pwd)/.tmp/protoc/bin:$(PATH)
+export PROTOC_VERSION := 22.0
+
 .PHONY: ci
 ci: deps checkgofmt vet staticcheck ineffassign predeclared test
 
@@ -28,9 +26,9 @@ checkgofmt:
 	fi
 
 .PHONY: generate
-generate:
+generate: .tmp/protoc/bin/protoc
 	@go install ./cmd/protoc-gen-grpchan
-	@go install google.golang.org/protobuf/cmd/protoc-gen-go@a709e31e5d12
+	@go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.26
 	@go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.1.0
 	go generate ./...
 
@@ -68,3 +66,6 @@ errcheck:
 .PHONY: test
 test:
 	go test -race ./...
+
+.tmp/protoc/bin/protoc: ./Makefile ./download_protoc.sh
+	./download_protoc.sh

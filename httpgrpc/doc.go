@@ -82,4 +82,4 @@
 // and response messages).
 package httpgrpc
 
-//go:generate protoc --go_out=. httpgrpc.proto
+//go:generate protoc --go_out=. --go_opt=paths=source_relative httpgrpc.proto
