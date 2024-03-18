@@ -8,7 +8,7 @@ require (
 	github.com/jhump/goprotoc v0.5.0
 	github.com/jhump/protoreflect v1.15.6
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20240318140521-94a12d6c2237
-	google.golang.org/grpc v1.62.1
+	google.golang.org/grpc v1.57.1
 	google.golang.org/protobuf v1.33.0
 )
 
