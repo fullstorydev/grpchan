@@ -62,7 +62,7 @@ func (ch *Channel) Invoke(ctx context.Context, methodName string, req, resp inte
 	h := headersFromContext(ctx)
 	h.Set("Content-Type", UnaryRpcContentType_V1)
 
-	codec := encoding.GetCodec(grpcproto.Name)
+	codec := internal.GetCodec(grpcproto.Name)
 	b, err := codec.Marshal(req)
 	if err != nil {
 		return err
@@ -241,7 +241,7 @@ func newClientStream(ctx context.Context, cancel context.CancelFunc, w io.WriteC
 		cancel:     cancel,
 		copts:      copts,
 		baseUrl:    baseUrl,
-		codec:      encoding.GetCodec(grpcproto.Name),
+		codec:      internal.GetCodec(grpcproto.Name),
 		w:          w,
 		respStream: recvStream,
 		rCh:        make(chan []byte),

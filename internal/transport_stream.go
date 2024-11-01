@@ -11,6 +11,13 @@ import (
 // UnaryServerTransportStream implements grpc.ServerTransportStream and can be
 // used by unary calls to collect headers and trailers from a handler.
 type UnaryServerTransportStream struct {
+	// Note: this is a bit risky. This could mean our type "inherits" methods
+	// that will auto-delegate to this embedded type, which would then cause
+	// a nil-dereference panic (since we don't actually have access to any
+	// concrete instance fo embed). But this package won't compile without it.
+	// ¯\_(ツ)_/¯
+	grpc.ServerTransportStream
+
 	// Name is the full method name in "/service/method" format.
 	Name string
 
@@ -109,6 +116,13 @@ func (sts *UnaryServerTransportStream) GetTrailers() metadata.MD {
 // ServerTransportStream implements grpc.ServerTransportStream and wraps a
 // grpc.ServerStream, delegating most calls to it.
 type ServerTransportStream struct {
+	// Note: this is a bit risky. This could mean our type "inherits" methods
+	// that will auto-delegate to this embedded type, which would then cause
+	// a nil-dereference panic (since we don't actually have access to any
+	// concrete instance fo embed). But this package won't compile without it.
+	// ¯\_(ツ)_/¯
+	grpc.ServerTransportStream
+
 	// Name is the full method name in "/service/method" format.
 	Name string
 	// Stream is the underlying stream to which header and trailer calls are

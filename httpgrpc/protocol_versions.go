@@ -1,6 +1,7 @@
 package httpgrpc
 
 import (
+	"github.com/fullstorydev/grpchan/internal"
 	"mime"
 
 	"google.golang.org/grpc/encoding"
@@ -51,11 +52,11 @@ func getUnaryCodec(contentType string) encoding.Codec {
 	mediaType, _, _ := mime.ParseMediaType(contentType)
 
 	if mediaType == UnaryRpcContentType_V1 {
-		return encoding.GetCodec(grpcproto.Name)
+		return internal.GetCodec(grpcproto.Name)
 	}
 
 	if mediaType == ApplicationJson {
-		return encoding.GetCodec("json")
+		return internal.GetCodec("json")
 	}
 
 	return nil
@@ -67,7 +68,7 @@ func getStreamingCodec(contentType string) encoding.Codec {
 	mediaType, _, _ := mime.ParseMediaType(contentType)
 
 	if mediaType == StreamRpcContentType_V1 {
-		return encoding.GetCodec(grpcproto.Name)
+		return internal.GetCodec(grpcproto.Name)
 	}
 
 	if mediaType == ApplicationJson {

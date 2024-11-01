@@ -42,7 +42,7 @@ func (ProtoCloner) Copy(out, in interface{}) error {
 	}
 	// maybe the user has registered a gRPC codec that can
 	// handle this thing
-	codec := encoding.GetCodec(grpcproto.Name)
+	codec := internal.GetCodec(grpcproto.Name)
 	return CodecCloner(codec).Copy(out, in)
 }
 
@@ -52,7 +52,7 @@ func (ProtoCloner) Clone(in interface{}) (interface{}, error) {
 	}
 	// maybe the user has registered a gRPC codec that can
 	// handle this thing
-	codec := encoding.GetCodec(grpcproto.Name)
+	codec := internal.GetCodec(grpcproto.Name)
 	return CodecCloner(codec).Clone(in)
 }
 
