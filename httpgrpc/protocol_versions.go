@@ -39,16 +39,10 @@ const (
 )
 
 const (
-	// Non-standard and experimental; uses the `jsonpb.Marshaler` by default. Not compatible
-	// with streams. Use `encoding.RegisterCodec` to override the default encoder with a custom
-	// encoder.
+	// Non-standard and experimental; uses the `jsonpb.Marshaler` by default. For streams, uses
+	// the registered json codec, adding record separators and line feeds according to RFC7464.
+	// Use `encoding.RegisterCodec` to override the default encoder with a custom encoder.
 	ApplicationJson = "application/json"
-
-	// Non-standard and experimental; uses the registered json codec, adding record separators
-	// and line feeds according to RFC7464. Only compatible with streams. Use `encoding.RegisterCodec`
-	// to override default json marshaling behavior or json-seq marshaling behavior.
-	// https://www.rfc-editor.org/rfc/rfc7464.html
-	ApplicationJsonSeq = "application/json-seq"
 )
 
 func getUnaryCodec(contentType string) encoding.Codec {
@@ -76,7 +70,7 @@ func getStreamingCodec(contentType string) encoding.Codec {
 		return encoding.GetCodec(grpcproto.Name)
 	}
 
-	if mediaType == ApplicationJsonSeq {
+	if mediaType == ApplicationJson {
 		return encoding.GetCodec("json-seq")
 	}
 

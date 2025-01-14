@@ -60,27 +60,28 @@ func ErrorRenderer(errFunc func(reqCtx context.Context, st *status.Status, respo
 
 // DefaultErrorRenderer translates the gRPC code in the given status to an HTTP
 // error response. The following table shows how status codes are translated:
-//   Canceled:         * 502 Bad Gateway
-//   Unknown:            500 Internal Server Error
-//   InvalidArgument:    400 Bad Request
-//   DeadlineExceeded: * 504 Gateway Timeout
-//   NotFound:           404 Not Found
-//   AlreadyExists:      409 Conflict
-//   PermissionDenied:   403 Forbidden
-//   Unauthenticated:    401 Unauthorized
-//   ResourceExhausted:  429 Too Many Requests
-//   FailedPrecondition: 412 Precondition Failed
-//   Aborted:            409 Conflict
-//   OutOfRange:         422 Unprocessable Entity
-//   Unimplemented:      501 Not Implemented
-//   Internal:           500 Internal Server Error
-//   Unavailable:        503 Service Unavailable
-//   DataLoss:           500 Internal Server Error
 //
-//   * If the gRPC status indicates Canceled or DeadlineExceeded
-//     and the given request context ALSO indicates a context error
-//     (meaning that the request was cancelled by the client), then
-//     a 499 Client Closed Request code is used instead.
+//	Canceled:         * 502 Bad Gateway
+//	Unknown:            500 Internal Server Error
+//	InvalidArgument:    400 Bad Request
+//	DeadlineExceeded: * 504 Gateway Timeout
+//	NotFound:           404 Not Found
+//	AlreadyExists:      409 Conflict
+//	PermissionDenied:   403 Forbidden
+//	Unauthenticated:    401 Unauthorized
+//	ResourceExhausted:  429 Too Many Requests
+//	FailedPrecondition: 412 Precondition Failed
+//	Aborted:            409 Conflict
+//	OutOfRange:         422 Unprocessable Entity
+//	Unimplemented:      501 Not Implemented
+//	Internal:           500 Internal Server Error
+//	Unavailable:        503 Service Unavailable
+//	DataLoss:           500 Internal Server Error
+//
+//	* If the gRPC status indicates Canceled or DeadlineExceeded
+//	  and the given request context ALSO indicates a context error
+//	  (meaning that the request was cancelled by the client), then
+//	  a 499 Client Closed Request code is used instead.
 //
 // If any other gRPC status code is observed, it would get translated into a
 // 500 Internal Server Error.
@@ -263,7 +264,11 @@ func handleStream(svr interface{}, serviceName string, desc *grpc.StreamDesc, st
 		}
 		defer cancel()
 
-		w.Header().Set("Content-Type", contentType)
+		if contentType == ApplicationJson {
+			w.Header().Set("Content-Type", "application/octet-stream")
+		} else {
+			w.Header().Set("Content-Type", contentType)
+		}
 
 		str := &serverStream{r: r, w: w, respStream: desc.ClientStreams, codec: codec}
 		sts := internal.ServerTransportStream{Name: info.FullMethod, Stream: str}
