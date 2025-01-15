@@ -265,7 +265,7 @@ func handleStream(svr interface{}, serviceName string, desc *grpc.StreamDesc, st
 		defer cancel()
 
 		if contentType == ApplicationJson {
-			w.Header().Set("Content-Type", "application/octet-stream")
+			w.Header().Set("Content-Type", "application/json-seq")
 		} else {
 			w.Header().Set("Content-Type", contentType)
 		}
