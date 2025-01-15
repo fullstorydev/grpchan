@@ -1,6 +1,7 @@
 package httpgrpc
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"errors"
@@ -437,6 +438,14 @@ func (s *serverStream) RecvMsg(m interface{}) error {
 	}
 
 	s.recvd++
+
+	// TODO: Remove request body inspection
+	body, err := io.ReadAll(s.r.Body)
+	if err != nil {
+		return err
+	}
+	bodyString := string(body)
+	s.r.Body = io.NopCloser(bytes.NewBuffer([]byte(bodyString)))
 
 	size, err := readSizePreface(s.r.Body)
 	if err != nil {
