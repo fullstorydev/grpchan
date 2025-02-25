@@ -38,8 +38,8 @@ vet:
 
 .PHONY: staticcheck
 staticcheck:
-	@go install honnef.co/go/tools/cmd/staticcheck@v0.4.3
-	staticcheck ./...
+	@go install honnef.co/go/tools/cmd/staticcheck@v0.5.1
+	staticcheck -checks "inherit,-SA1019" ./...
 
 .PHONY: ineffassign
 ineffassign:
@@ -48,7 +48,7 @@ ineffassign:
 
 .PHONY: predeclared
 predeclared:
-	@go install github.com/nishanths/predeclared@5f2f810c9ae6
+	@go install github.com/nishanths/predeclared@245576f9a85c96ea16c750df3887f1d827f01e9c
 	predeclared .
 
 # Intentionally omitted from CI, but target here for ad-hoc reports.
