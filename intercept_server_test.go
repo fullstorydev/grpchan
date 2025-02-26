@@ -3,7 +3,6 @@ package grpchan_test
 import (
 	"context"
 	"fmt"
-	"github.com/golang/protobuf/ptypes/empty"
 	"io"
 	"reflect"
 	"testing"
@@ -368,7 +367,7 @@ func (s *testServer) BidiStream(stream grpchantesting.TestService_BidiStreamServ
 	}, nil, stream)
 }
 
-func (s *testServer) UseExternalMessageTwice(ctx context.Context, req *emptypb.Empty) (*empty.Empty, error) {
+func (s *testServer) UseExternalMessageTwice(ctx context.Context, req *emptypb.Empty) (*emptypb.Empty, error) {
 	resp := emptypb.Empty{}
 	err := s.unary(ctx, "UseExternalMessageTwice", req, &resp)
 	if err != nil {
