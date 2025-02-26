@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"fmt"
+	"google.golang.org/grpc/mem"
 	"io"
 	"math"
 	"net/http"
@@ -28,11 +29,12 @@ func writeSizePreface(w io.Writer, sz int32) error {
 // size is written as a negative value, indicating to the receiver that this
 // is the last message in the stream. (The last message should be an instance
 // of HttpTrailer.)
-func writeProtoMessage(w io.Writer, codec encoding.Codec, m interface{}, end bool) error {
-	b, err := codec.Marshal(m)
+func writeProtoMessage(w io.Writer, codec encoding.CodecV2, m interface{}, end bool) error {
+	buf, err := codec.Marshal(m)
 	if err != nil {
 		return err
 	}
+	b := buf.Materialize()
 
 	sz := len(b)
 	if sz > math.MaxInt32 {
@@ -70,7 +72,7 @@ func readSizePreface(in io.Reader) (int32, error) {
 // message. The sz parameter indicates the  number of bytes that must be read to
 // decode the proto. This does not first call readSizePreface; callers must do that
 // first.
-func readProtoMessage(in io.Reader, codec encoding.Codec, sz int32, m interface{}) error {
+func readProtoMessage(in io.Reader, codec encoding.CodecV2, sz int32, m interface{}) error {
 	if sz < 0 {
 		return fmt.Errorf("bad size preface: size cannot be negative: %d", sz)
 	} else if sz > maxMessageSize {
@@ -81,7 +83,7 @@ func readProtoMessage(in io.Reader, codec encoding.Codec, sz int32, m interface{
 	if err != nil {
 		return err
 	}
-	return codec.Unmarshal(msg, m)
+	return codec.Unmarshal(mem.BufferSlice{mem.SliceBuffer(msg)}, m)
 }
 
 // asMetadata converts the given HTTP headers into GRPC metadata.

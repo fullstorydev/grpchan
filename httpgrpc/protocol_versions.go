@@ -41,33 +41,33 @@ const (
 const (
 	// Non-standard and experimental; uses the `jsonpb.Marshaler` by default.
 	// Only unary calls are supported; streams with JSON encoding are not supported.
-	// Use `encoding.RegisterCodec` to override the default encoder with a custom encoder.
+	// Use `encoding.RegisterCodecV2` to override the default encoder with a custom encoder.
 	ApplicationJson = "application/json"
 )
 
-func getUnaryCodec(contentType string) encoding.Codec {
+func getUnaryCodec(contentType string) encoding.CodecV2 {
 	// Ignore any errors or charsets for now, just parse the main type.
 	// TODO: should this be more picky / return an error?  Maybe charset utf8 only?
 	mediaType, _, _ := mime.ParseMediaType(contentType)
 
 	if mediaType == UnaryRpcContentType_V1 {
-		return encoding.GetCodec(grpcproto.Name)
+		return encoding.GetCodecV2(grpcproto.Name)
 	}
 
 	if mediaType == ApplicationJson {
-		return encoding.GetCodec("json")
+		return encoding.GetCodecV2("json")
 	}
 
 	return nil
 }
 
-func getStreamingCodec(contentType string) encoding.Codec {
+func getStreamingCodec(contentType string) encoding.CodecV2 {
 	// Ignore any errors or charsets for now, just parse the main type.
 	// TODO: should this be more picky / return an error?  Maybe charset utf8 only?
 	mediaType, _, _ := mime.ParseMediaType(contentType)
 
 	if mediaType == StreamRpcContentType_V1 {
-		return encoding.GetCodec(grpcproto.Name)
+		return encoding.GetCodecV2(grpcproto.Name)
 	}
 
 	if mediaType == ApplicationJson {

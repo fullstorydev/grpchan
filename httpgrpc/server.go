@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"google.golang.org/grpc/mem"
 	"io"
 	"io/ioutil"
 	"net/http"
@@ -280,7 +281,7 @@ func handleMethod(svr interface{}, serviceName string, desc *grpc.MethodDesc, un
 		}
 
 		dec := func(msg interface{}) error {
-			if err := codec.Unmarshal(req, msg); err != nil {
+			if err := codec.Unmarshal(mem.BufferSlice{mem.SliceBuffer(req)}, msg); err != nil {
 				return status.Error(codes.InvalidArgument, err.Error())
 			}
 			return nil
@@ -301,10 +302,11 @@ func handleMethod(svr interface{}, serviceName string, desc *grpc.MethodDesc, un
 			statProto := st.Proto()
 			w.Header().Set("X-GRPC-Status", fmt.Sprintf("%d:%s", statProto.Code, statProto.Message))
 			for _, d := range statProto.Details {
-				b, err := codec.Marshal(d)
+				buf, err := codec.Marshal(d)
 				if err != nil {
 					continue
 				}
+				b := buf.Materialize()
 				str := base64.RawURLEncoding.EncodeToString(b)
 				w.Header().Add(grpcDetailsHeader, str)
 			}
@@ -312,11 +314,12 @@ func handleMethod(svr interface{}, serviceName string, desc *grpc.MethodDesc, un
 			return
 		}
 
-		b, err := codec.Marshal(resp)
+		buf, err := codec.Marshal(resp)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError)
 			return
 		}
+		b := buf.Materialize()
 
 		w.Header().Set("Content-Type", contentType)
 		w.Header().Set("Content-Length", fmt.Sprintf("%d", len(b)))
@@ -453,7 +456,7 @@ type serverStream struct {
 	ctx context.Context
 	// respStream is set to indicate whether client expects stream response; unary if false
 	respStream bool
-	codec      encoding.Codec
+	codec      encoding.CodecV2
 
 	// rmu serializes access to r and protects recvd
 	rmu sync.Mutex
