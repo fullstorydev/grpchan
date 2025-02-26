@@ -42,8 +42,13 @@ func (ProtoCloner) Copy(out, in interface{}) error {
 	}
 	// maybe the user has registered a gRPC codec that can
 	// handle this thing
-	codec := encoding.GetCodec(grpcproto.Name)
-	return CodecCloner(codec).Copy(out, in)
+	if codec := encoding.GetCodecV2(grpcproto.Name); codec != nil {
+		return CodecClonerV2(codec).Copy(out, in)
+	}
+	if codec := encoding.GetCodec(grpcproto.Name); codec != nil {
+		return CodecCloner(codec).Copy(out, in)
+	}
+	panic("no codec found")
 }
 
 func (ProtoCloner) Clone(in interface{}) (interface{}, error) {
@@ -52,8 +57,13 @@ func (ProtoCloner) Clone(in interface{}) (interface{}, error) {
 	}
 	// maybe the user has registered a gRPC codec that can
 	// handle this thing
-	codec := encoding.GetCodec(grpcproto.Name)
-	return CodecCloner(codec).Clone(in)
+	if codec := encoding.GetCodecV2(grpcproto.Name); codec != nil {
+		return CodecClonerV2(codec).Clone(in)
+	}
+	if codec := encoding.GetCodec(grpcproto.Name); codec != nil {
+		return CodecCloner(codec).Clone(in)
+	}
+	panic("no codec found")
 }
 
 // CloneFunc adapts a single clone function to the Cloner interface. The given
@@ -104,6 +114,22 @@ func CopyFunc(fn func(out, in interface{}) error) Cloner {
 // reflection to create a new value of the same type and uses this strategy to
 // then copy the input to the newly created value.
 func CodecCloner(codec encoding.Codec) Cloner {
+	return CopyFunc(func(out, in interface{}) error {
+		if b, err := codec.Marshal(in); err != nil {
+			return err
+		} else if err := codec.Unmarshal(b, out); err != nil {
+			return err
+		}
+		return nil
+	})
+}
+
+// CodecClonerV2 uses the given codec to implement the Cloner interface. The Copy
+// method is implemented by using the code to marshal the input to bytes and
+// then unmarshal from bytes into the output value. The Clone method then uses
+// reflection to create a new value of the same type and uses this strategy to
+// then copy the input to the newly created value.
+func CodecClonerV2(codec encoding.CodecV2) Cloner {
 	return CopyFunc(func(out, in interface{}) error {
 		if b, err := codec.Marshal(in); err != nil {
 			return err

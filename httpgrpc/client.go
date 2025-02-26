@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"encoding/base64"
 	"fmt"
+	"google.golang.org/grpc/mem"
 	"io"
 	"io/ioutil"
 	"net/http"
@@ -62,11 +63,12 @@ func (ch *Channel) Invoke(ctx context.Context, methodName string, req, resp inte
 	h := headersFromContext(ctx)
 	h.Set("Content-Type", UnaryRpcContentType_V1)
 
-	codec := encoding.GetCodec(grpcproto.Name)
-	b, err := codec.Marshal(req)
+	codec := encoding.GetCodecV2(grpcproto.Name)
+	buf, err := codec.Marshal(req)
 	if err != nil {
 		return err
 	}
+	b := buf.Materialize()
 
 	// TODO: enforce max send and receive size in call options
 
@@ -113,7 +115,8 @@ func (ch *Channel) Invoke(ctx context.Context, methodName string, req, resp inte
 	if err != nil {
 		return err
 	}
-	return codec.Unmarshal(b, resp)
+
+	return codec.Unmarshal(mem.BufferSlice{mem.SliceBuffer(b)}, resp)
 }
 
 // NewStream satisfies the grpchan.Channel interface and supports sending
@@ -208,7 +211,7 @@ type clientStream struct {
 	cancel  context.CancelFunc
 	copts   *internal.CallOptions
 	baseUrl *url.URL
-	codec   encoding.Codec
+	codec   encoding.CodecV2
 
 	// respStream is set to indicate whether client expects stream response; unary if false
 	respStream bool
@@ -241,7 +244,7 @@ func newClientStream(ctx context.Context, cancel context.CancelFunc, w io.WriteC
 		cancel:     cancel,
 		copts:      copts,
 		baseUrl:    baseUrl,
-		codec:      encoding.GetCodec(grpcproto.Name),
+		codec:      encoding.GetCodecV2(grpcproto.Name),
 		w:          w,
 		respStream: recvStream,
 		rCh:        make(chan []byte),
@@ -337,7 +340,7 @@ func (cs *clientStream) RecvMsg(m interface{}) error {
 			}
 			return err
 		}
-		err := cs.codec.Unmarshal(msg, m)
+		err := cs.codec.Unmarshal(mem.BufferSlice{mem.SliceBuffer(msg)}, m)
 		if err != nil {
 			return status.Error(codes.Internal, fmt.Sprintf("server sent invalid message: %v", err))
 		}
