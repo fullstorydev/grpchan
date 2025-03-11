@@ -153,7 +153,7 @@ func chainUnaryClient(unaryInt []grpc.UnaryClientInterceptor) grpc.UnaryClientIn
 				return currInterceptor(ctx, method, req, reply, cc, currInvoker, opts...)
 			}
 		}
-		return unaryInt[0](ctx, method, req, reply, cc, invoker, opts...)
+		return invoker(ctx, method, req, reply, cc, opts...)
 	}
 }
 
@@ -169,7 +169,7 @@ func chainStreamClient(streamInt []grpc.StreamClientInterceptor) grpc.StreamClie
 				return currInterceptor(ctx, desc, cc, method, currStreamer, opts...)
 			}
 		}
-		return streamInt[0](ctx, desc, cc, method, streamer, opts...)
+		return streamer(ctx, desc, cc, method, opts...)
 	}
 }
 
