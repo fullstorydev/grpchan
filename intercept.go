@@ -301,7 +301,7 @@ func chainUnaryServer(unaryInt []grpc.UnaryServerInterceptor) grpc.UnaryServerIn
 				return currInterceptor(ctx, req, info, currHandler)
 			}
 		}
-		return unaryInt[0](ctx, req, info, handler)
+		return handler(ctx, req)
 	}
 }
 
@@ -317,6 +317,6 @@ func chainStreamServer(streamInt []grpc.StreamServerInterceptor) grpc.StreamServ
 				return currInterceptor(impl, stream, info, currHandler)
 			}
 		}
-		return streamInt[0](impl, stream, info, handler)
+		return handler(impl, stream)
 	}
 }

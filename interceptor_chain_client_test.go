@@ -29,6 +29,9 @@ var interceptorChainCases = []struct {
 		setupClient: func(conn grpc.ClientConnInterface) grpc.ClientConnInterface {
 			return setupClientChainBatch(conn)
 		},
+		setupServer: func(reg grpc.ServiceRegistrar) grpc.ServiceRegistrar {
+			return setupServerChainBatch(reg)
+		},
 		unaryIntercepted:  true,
 		streamIntercepted: true,
 	},
@@ -36,6 +39,9 @@ var interceptorChainCases = []struct {
 		name: "singles",
 		setupClient: func(conn grpc.ClientConnInterface) grpc.ClientConnInterface {
 			return setupClientChainSingles(conn)
+		},
+		setupServer: func(reg grpc.ServiceRegistrar) grpc.ServiceRegistrar {
+			return setupServerChainSingles(reg)
 		},
 		unaryIntercepted:  true,
 		streamIntercepted: true,
@@ -45,6 +51,9 @@ var interceptorChainCases = []struct {
 		setupClient: func(conn grpc.ClientConnInterface) grpc.ClientConnInterface {
 			return setupClientChainPairs(conn)
 		},
+		setupServer: func(reg grpc.ServiceRegistrar) grpc.ServiceRegistrar {
+			return setupServerChainPairs(reg)
+		},
 		unaryIntercepted:  true,
 		streamIntercepted: true,
 	},
@@ -52,6 +61,9 @@ var interceptorChainCases = []struct {
 		name: "unary-only",
 		setupClient: func(conn grpc.ClientConnInterface) grpc.ClientConnInterface {
 			return setupClientChainUnaryOnly(conn)
+		},
+		setupServer: func(reg grpc.ServiceRegistrar) grpc.ServiceRegistrar {
+			return setupServerChainUnaryOnly(reg)
 		},
 		unaryIntercepted:  true,
 		streamIntercepted: false,
@@ -61,6 +73,9 @@ var interceptorChainCases = []struct {
 		setupClient: func(conn grpc.ClientConnInterface) grpc.ClientConnInterface {
 			return setupClientChainStreamOnly(conn)
 		},
+		setupServer: func(reg grpc.ServiceRegistrar) grpc.ServiceRegistrar {
+			return setupServerChainStreamOnly(reg)
+		},
 		unaryIntercepted:  false,
 		streamIntercepted: true,
 	},
@@ -68,6 +83,9 @@ var interceptorChainCases = []struct {
 		name: "none",
 		setupClient: func(conn grpc.ClientConnInterface) grpc.ClientConnInterface {
 			return conn
+		},
+		setupServer: func(reg grpc.ServiceRegistrar) grpc.ServiceRegistrar {
+			return reg
 		},
 		unaryIntercepted:  false,
 		streamIntercepted: false,
@@ -101,7 +119,7 @@ func TestInterceptorChainClient_Unary(t *testing.T) {
 			var reply string
 			var headers, trailers metadata.MD
 			if err := intercepted.Invoke(ctx, "/foo/bar", req, &reply, grpc.Header(&headers), grpc.Trailer(&trailers)); err != nil {
-				t.Errorf("unexpected RPC error: %v", err)
+				t.Fatalf("unexpected RPC error: %v", err)
 			} else if reply != expectReply {
 				t.Errorf("unexpected reply: %s", reply)
 			}
@@ -146,33 +164,33 @@ func TestInterceptorChainClient_Stream(t *testing.T) {
 				t.Errorf("unexpected RPC error: %v", err)
 			}
 			if err := stream.SendMsg("req1" + reqSuffix); err != nil {
-				t.Errorf("unexpected RPC error: %v", err)
+				t.Fatalf("unexpected RPC error: %v", err)
 			}
 			if err := stream.SendMsg("req2" + reqSuffix); err != nil {
-				t.Errorf("unexpected RPC error: %v", err)
+				t.Fatalf("unexpected RPC error: %v", err)
 			}
 			if err := stream.SendMsg("req3" + reqSuffix); err != nil {
-				t.Errorf("unexpected RPC error: %v", err)
+				t.Fatalf("unexpected RPC error: %v", err)
 			}
 			if err := stream.CloseSend(); err != nil {
-				t.Errorf("unexpected RPC error: %v", err)
+				t.Fatalf("unexpected RPC error: %v", err)
 			}
 
 			var reply string
 			if err := stream.RecvMsg(&reply); err != nil {
-				t.Errorf("unexpected RPC error: %v", err)
+				t.Fatalf("unexpected RPC error: %v", err)
 			}
 			if reply != "reply3"+expectReplySuffix {
 				t.Errorf("unexpected reply: %s", reply)
 			}
 			if err := stream.RecvMsg(&reply); err != nil {
-				t.Errorf("unexpected RPC error: %v", err)
+				t.Fatalf("unexpected RPC error: %v", err)
 			}
 			if reply != "reply2"+expectReplySuffix {
 				t.Errorf("unexpected reply: %s", reply)
 			}
 			if err := stream.RecvMsg(&reply); err != nil {
-				t.Errorf("unexpected RPC error: %v", err)
+				t.Fatalf("unexpected RPC error: %v", err)
 			}
 			if reply != "reply1"+expectReplySuffix {
 				t.Errorf("unexpected reply: %s", reply)
@@ -402,7 +420,15 @@ func (t *testChainConn) Invoke(ctx context.Context, method string, args any, rep
 	return nil
 }
 
-func (t *testChainConn) NewStream(ctx context.Context, desc *grpc.StreamDesc, method string, opts ...grpc.CallOption) (grpc.ClientStream, error) {
+func (t *testChainConn) NewStream(ctx context.Context, _ *grpc.StreamDesc, method string, _ ...grpc.CallOption) (grpc.ClientStream, error) {
+	if method != "/foo/bar" {
+		return nil, fmt.Errorf("unexpected method: %s", method)
+	}
+	headers, _ := metadata.FromOutgoingContext(ctx)
+	expectHeaders := metadata.Pairs("header", "value", "header-A", "value-A", "header-B", "value-B", "header-C", "value-C")
+	if !reflect.DeepEqual(expectHeaders, headers) {
+		t.t.Errorf("unexpected headers: %s", headers)
+	}
 	return &testChainStreamClient{t: t.t, ctx: ctx}, nil
 }
 
@@ -434,11 +460,11 @@ func (t *testChainStreamClient) SendMsg(m any) error {
 	if t.done {
 		return io.EOF
 	}
-	t.count++
 	str, ok := m.(string)
 	if !ok {
 		return fmt.Errorf("invalid message: %T", m)
 	}
+	t.count++
 	if str != "req"+strconv.Itoa(t.count)+",A,B,C" {
 		t.t.Errorf("unexpected request: %s", str)
 	}
