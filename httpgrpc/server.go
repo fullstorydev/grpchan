@@ -208,32 +208,34 @@ func DefaultErrorRenderer(ctx context.Context, st *status.Status, w http.Respons
 	http.Error(w, msg, code)
 }
 
-// HeaderMatcherFunc takes a header key as input and returns two values:
+// HeaderMatcherFunc takes a header key and values as input and returns three values:
 //   - A string representing the possibly modified key to use in the metadata
+//   - A slice of strings representing the possibly modified values to use in the metadata
 //   - A boolean indicating whether to include (true) or exclude (false) the header
-type HeaderMatcherFunc func(key string) (string, bool)
+type HeaderMatcherFunc func(key string, vals []string) (string, []string, bool)
 
 // IncomingHeaderMatcher returns a HandlerOption that configures a custom header matcher
 // function for handling incoming HTTP headers. The provided matcher function is called
 // for each incoming HTTP header and determines whether and how the header should be
 // included in the gRPC context metadata.
 //
-// The matcher function takes a header key as input and returns two values:
+// The matcher function takes a header key and values as input and returns three values:
 //   - A string representing the possibly modified key to use in the metadata
+//   - A slice of strings representing the possibly modified values to use in the metadata
 //   - A boolean indicating whether to include (true) or exclude (false) the header
 //
 // If no matcher is configured, DefaultHeaderMatcher is used, which includes all headers
-// with unchanged keys.
+// unchanged.
 //
 // Example:
 //
 //	server := httpgrpc.NewServer(
-//	    httpgrpc.IncomingHeaderMatcher(func(key string) (string, bool) {
+//	    httpgrpc.IncomingHeaderMatcher(func(key string, vals []string) (string, []string, bool) {
 //	        // Only include headers prefixed with "x-"
 //	        if strings.HasPrefix(strings.ToLower(key), "x-") {
-//	            return key, true
+//	            return key, vals, true
 //	        }
-//	        return "", false
+//	        return "", nil, false
 //	    }),
 //	)
 func IncomingHeaderMatcher(matcher HeaderMatcherFunc) HandlerOption {
@@ -243,11 +245,11 @@ func IncomingHeaderMatcher(matcher HeaderMatcherFunc) HandlerOption {
 }
 
 // DefaultHeaderMatcher is the default header matcher function. It returns the
-// original key and true for all headers, meaning that all headers will be
-// included in the gRPC context metadata. This is the default behavior if no
+// original key, values and true for all headers, meaning that all headers will
+// be included in the gRPC context metadata. This is the default behavior if no
 // custom matcher is provided.
-func DefaultHeaderMatcher(key string) (string, bool) {
-	return key, true
+func DefaultHeaderMatcher(key string, vals []string) (string, []string, bool) {
+	return key, vals, true
 }
 
 // HandleServices uses the given mux to register handlers for all methods

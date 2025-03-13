@@ -87,14 +87,14 @@ func readProtoMessage(in io.Reader, codec encoding.CodecV2, sz int32, m interfac
 }
 
 // asMetadata converts the given HTTP headers into GRPC metadata.
-// A HeaderMatcherFunc can be provided to filter or modify the header keys.
+// A HeaderMatcherFunc can be provided to filter or modify the headers.
 func asMetadata(header http.Header, matcher HeaderMatcherFunc) (metadata.MD, error) {
 	// metadata has same shape as http.Header,
 	md := metadata.MD{}
 	for k, vs := range header {
 		if matcher != nil {
 			var keep bool
-			if k, keep = matcher(k); !keep {
+			if k, vs, keep = matcher(k, vs); !keep {
 				// ignore headers that don't match
 				continue
 			}
