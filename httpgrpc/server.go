@@ -142,7 +142,8 @@ func (ho HandlerOption) apply(s *Server) {
 }
 
 type handlerOpts struct {
-	errFunc func(context.Context, *status.Status, http.ResponseWriter)
+	errFunc               func(context.Context, *status.Status, http.ResponseWriter)
+	incomingHeaderMatcher HeaderMatcherFunc
 }
 
 // ErrorRenderer returns a HandlerOption that will cause the handler to use the
@@ -207,6 +208,50 @@ func DefaultErrorRenderer(ctx context.Context, st *status.Status, w http.Respons
 	http.Error(w, msg, code)
 }
 
+// HeaderMatcherFunc takes a header key and values as input and returns three values:
+//   - A string representing the possibly modified key to use in the metadata
+//   - A slice of strings representing the possibly modified values to use in the metadata
+//   - A boolean indicating whether to include (true) or exclude (false) the header
+type HeaderMatcherFunc func(key string, vals []string) (string, []string, bool)
+
+// IncomingHeaderMatcher returns a HandlerOption that configures a custom header matcher
+// function for handling incoming HTTP headers. The provided matcher function is called
+// for each incoming HTTP header and determines whether and how the header should be
+// included in the gRPC context metadata.
+//
+// The matcher function takes a header key and values as input and returns three values:
+//   - A string representing the possibly modified key to use in the metadata
+//   - A slice of strings representing the possibly modified values to use in the metadata
+//   - A boolean indicating whether to include (true) or exclude (false) the header
+//
+// If no matcher is configured, DefaultHeaderMatcher is used, which includes all headers
+// unchanged.
+//
+// Example:
+//
+//	server := httpgrpc.NewServer(
+//	    httpgrpc.IncomingHeaderMatcher(func(key string, vals []string) (string, []string, bool) {
+//	        // Only include headers prefixed with "x-"
+//	        if strings.HasPrefix(strings.ToLower(key), "x-") {
+//	            return key, vals, true
+//	        }
+//	        return "", nil, false
+//	    }),
+//	)
+func IncomingHeaderMatcher(matcher HeaderMatcherFunc) HandlerOption {
+	return func(h *handlerOpts) {
+		h.incomingHeaderMatcher = matcher
+	}
+}
+
+// DefaultHeaderMatcher is the default header matcher function. It returns the
+// original key, values and true for all headers, meaning that all headers will
+// be included in the gRPC context metadata. This is the default behavior if no
+// custom matcher is provided.
+func DefaultHeaderMatcher(key string, vals []string) (string, []string, bool) {
+	return key, vals, true
+}
+
 // HandleServices uses the given mux to register handlers for all methods
 // exposed by handlers registered in reg. They are registered using a path of
 // "basePath/name.of.Service/Method". If non-nil interceptor(s) are provided
@@ -247,6 +292,10 @@ func handleMethod(svr interface{}, serviceName string, desc *grpc.MethodDesc, un
 	if errHandler == nil {
 		errHandler = DefaultErrorRenderer
 	}
+	incomingHeaderMatcher := opts.incomingHeaderMatcher
+	if incomingHeaderMatcher == nil {
+		incomingHeaderMatcher = DefaultHeaderMatcher
+	}
 	fullMethod := fmt.Sprintf("/%s/%s", serviceName, desc.MethodName)
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
@@ -267,7 +316,7 @@ func handleMethod(svr interface{}, serviceName string, desc *grpc.MethodDesc, un
 			return
 		}
 
-		ctx, cancel, err := contextFromHeaders(ctx, r.Header)
+		ctx, cancel, err := contextFromHeaders(ctx, r.Header, incomingHeaderMatcher)
 		if err != nil {
 			writeError(w, http.StatusBadRequest)
 			return
@@ -338,6 +387,10 @@ func HandleStream(svr interface{}, serviceName string, desc *grpc.StreamDesc, st
 }
 
 func handleStream(svr interface{}, serviceName string, desc *grpc.StreamDesc, streamInt grpc.StreamServerInterceptor, opts *handlerOpts) http.HandlerFunc {
+	incomingHeaderMatcher := opts.incomingHeaderMatcher
+	if incomingHeaderMatcher == nil {
+		incomingHeaderMatcher = DefaultHeaderMatcher
+	}
 	info := &grpc.StreamServerInfo{
 		FullMethod:     fmt.Sprintf("/%s/%s", serviceName, desc.StreamName),
 		IsClientStream: desc.ClientStreams,
@@ -362,7 +415,7 @@ func handleStream(svr interface{}, serviceName string, desc *grpc.StreamDesc, st
 			return
 		}
 
-		ctx, cancel, err := contextFromHeaders(ctx, r.Header)
+		ctx, cancel, err := contextFromHeaders(ctx, r.Header, incomingHeaderMatcher)
 		if err != nil {
 			writeError(w, http.StatusBadRequest)
 			return
@@ -564,11 +617,12 @@ func (s *serverStream) RecvMsg(m interface{}) error {
 
 // contextFromHeaders returns a child of the given context that is populated
 // using the given headers. The headers are converted to incoming metadata that
-// can be retrieved via metadata.FromIncomingContext. If the headers contain a
-// GRPC timeout, that is used to create a timeout for the returned context.
-func contextFromHeaders(parent context.Context, h http.Header) (context.Context, context.CancelFunc, error) {
+// can be retrieved via metadata.FromIncomingContext, possibly modified by the
+// provided HeaderMatcherFunc. If the headers contain a GRPC timeout, that is
+// used to create a timeout for the returned context.
+func contextFromHeaders(parent context.Context, h http.Header, headerMatcher HeaderMatcherFunc) (context.Context, context.CancelFunc, error) {
 	cancel := func() {} // default to no-op
-	md, err := asMetadata(h)
+	md, err := asMetadata(h, headerMatcher)
 	if err != nil {
 		return parent, cancel, err
 	}

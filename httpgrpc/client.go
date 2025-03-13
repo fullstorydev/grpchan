@@ -178,7 +178,7 @@ func getPeer(baseUrl *url.URL, tls *tls.ConnectionState) *peer.Peer {
 }
 
 func setMetadata(h http.Header, copts *internal.CallOptions) error {
-	hdr, err := asMetadata(h)
+	hdr, err := asMetadata(h, nil)
 	if err != nil {
 		return err
 	}
@@ -429,7 +429,7 @@ func (cs *clientStream) doHttpCall(transport http.RoundTripper, req *http.Reques
 	if len(cs.copts.Peer) > 0 {
 		cs.copts.SetPeer(getPeer(cs.baseUrl, reply.TLS))
 	}
-	md, err := asMetadata(reply.Header)
+	md, err := asMetadata(reply.Header, nil)
 	if err != nil {
 		onReady(err, nil)
 		return
