@@ -1,7 +1,6 @@
 module github.com/fullstorydev/grpchan
 
 go 1.22
-
 toolchain go1.23.5
 
 require (
@@ -16,7 +15,7 @@ require (
 
 require (
 	github.com/bufbuild/protocompile v0.9.0 // indirect
-	golang.org/x/net v0.33.0 // indirect
+	golang.org/x/net v0.36.0 // indirect
 	golang.org/x/sys v0.30.0 // indirect
-	golang.org/x/text v0.21.0 // indirect
+	golang.org/x/text v0.22.0 // indirect
 )
