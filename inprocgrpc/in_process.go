@@ -15,11 +15,13 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/peer"
+	"google.golang.org/grpc/stats"
 	"google.golang.org/grpc/status"
 
 	"github.com/fullstorydev/grpchan"
@@ -125,10 +127,13 @@ type Channel struct {
 	unaryInterceptor  grpc.UnaryServerInterceptor
 	streamInterceptor grpc.StreamServerInterceptor
 	cloner            Cloner
+	statsHandler      stats.Handler
 }
 
-var _ grpc.ClientConnInterface = (*Channel)(nil)
-var _ grpc.ServiceRegistrar = (*Channel)(nil)
+var (
+	_ grpc.ClientConnInterface = (*Channel)(nil)
+	_ grpc.ServiceRegistrar    = (*Channel)(nil)
+)
 
 // RegisterService registers the given service and implementation. Like a normal
 // gRPC server, an in-process channel only allows a single implementation for a
@@ -175,6 +180,14 @@ func (c *Channel) WithServerStreamInterceptor(interceptor grpc.StreamServerInter
 // but will cause a runtime panic), you must provide a custom cloner.
 func (c *Channel) WithCloner(cloner Cloner) *Channel {
 	c.cloner = cloner
+	return c
+}
+
+// WithStatsHandler configures the in-process channel to use the given stats
+// handler. The handler will receive stats events for all RPCs made through this
+// channel, similar to how stats handlers work with grpc.Server and grpc.Dial.
+func (c *Channel) WithStatsHandler(h stats.Handler) *Channel {
+	c.statsHandler = h
 	return c
 }
 
@@ -234,6 +247,19 @@ func (c *Channel) Invoke(ctx context.Context, method string, req, resp interface
 		cloner = ProtoCloner{}
 	}
 
+	// Stats handler setup
+	var sh *statsHandlerHelper
+	if c.statsHandler != nil {
+		sh = &statsHandlerHelper{
+			handler:        c.statsHandler,
+			method:         method,
+			isClientStream: false,
+			isServerStream: false,
+		}
+		ctx = sh.tagRPC(ctx)
+		sh.begin(ctx, true)
+	}
+
 	codec := func(out interface{}) error {
 		return cloner.Copy(out, req)
 	}
@@ -247,58 +273,88 @@ func (c *Channel) Invoke(ctx context.Context, method string, req, resp interface
 			sts.Finish()
 			close(ch)
 		}()
-		ctx := grpc.NewContextWithServerTransportStream(makeServerContext(ctx), &sts)
-		v, err := md.Handler(handler, ctx, codec, c.unaryInterceptor)
-		if h := sts.GetHeaders(); len(h) > 0 {
-			_ = writeMessage(ctx, nil, ch, frame{headers: h})
+		svrCtx := grpc.NewContextWithServerTransportStream(makeServerContext(ctx), &sts)
+		// Server-side stats
+		if sh != nil {
+			svrCtx = sh.tagRPC(svrCtx)
+			sh.begin(svrCtx, false)
 		}
-		if err == nil {
+		v, svrErr := md.Handler(handler, svrCtx, codec, c.unaryInterceptor)
+		if sh != nil {
+			defer sh.end(svrCtx, false, svrErr)
+		}
+		if h := sts.GetHeaders(); len(h) > 0 {
+			_ = writeMessage(svrCtx, nil, ch, frame{headers: h})
+		}
+		if svrErr == nil {
 			if isNil(v) {
-				err = status.Errorf(codes.Internal, "handler returned neither error nor response message")
+				svrErr = status.Errorf(codes.Internal, "handler returned neither error nor response message")
 			} else {
-				_ = writeMessage(ctx, nil, ch, frame{data: v})
+				_ = writeMessage(svrCtx, nil, ch, frame{data: v})
 			}
 		}
 		if t := sts.GetTrailers(); len(t) > 0 {
-			_ = writeMessage(ctx, nil, ch, frame{trailers: t})
+			_ = writeMessage(svrCtx, nil, ch, frame{trailers: t})
 		}
-		if err != nil {
-			_ = writeMessage(ctx, nil, ch, frame{err: err})
+		if svrErr != nil {
+			_ = writeMessage(svrCtx, nil, ch, frame{err: svrErr})
 		}
 	}()
 
 	gotResponse := false
+	var rpcErr error
+	defer func() {
+		if sh != nil {
+			sh.end(ctx, true, rpcErr)
+		}
+	}()
+
 	for {
 		select {
 		case r, ok := <-ch:
 			if !ok {
 				// no more messages
 				if !gotResponse {
-					return io.EOF
+					rpcErr = io.EOF
+					return rpcErr
 				}
 				return nil
 			}
 			switch {
 			case r.err != nil:
-				return r.err
+				rpcErr = r.err
+				return rpcErr
 			case r.data != nil:
 				if gotResponse {
-					return status.Error(codes.Internal, "server sent unexpected response message")
+					rpcErr = status.Error(codes.Internal, "server sent unexpected response message")
+					return rpcErr
 				}
 				gotResponse = true
 				if err := cloner.Copy(resp, r.data); err != nil {
-					return err
+					rpcErr = err
+					return rpcErr
+				}
+				if sh != nil {
+					sh.inPayload(ctx, r.data)
 				}
 			case r.headers != nil:
 				copts.SetHeaders(r.headers)
+				if sh != nil {
+					sh.inHeader(ctx, r.headers)
+				}
 			case r.trailers != nil:
 				copts.SetTrailers(r.trailers)
+				if sh != nil {
+					sh.inTrailer(ctx, r.trailers, nil)
+				}
 			default:
 				// TODO: panic?
-				return status.Error(codes.Internal, "server sent empty frame")
+				rpcErr = status.Error(codes.Internal, "server sent empty frame")
+				return rpcErr
 			}
 		case <-ctx.Done():
-			return internal.TranslateContextError(ctx.Err())
+			rpcErr = internal.TranslateContextError(ctx.Err())
+			return rpcErr
 		}
 	}
 }
@@ -334,6 +390,19 @@ func (c *Channel) NewStream(ctx context.Context, desc *grpc.StreamDesc, method s
 		return nil, status.Errorf(codes.Unimplemented, "method %s/%s not implemented", serviceName, methodName)
 	}
 
+	// Stats handler setup
+	var sh *statsHandlerHelper
+	if c.statsHandler != nil {
+		sh = &statsHandlerHelper{
+			handler:        c.statsHandler,
+			method:         method,
+			isClientStream: md.ClientStreams,
+			isServerStream: md.ServerStreams,
+		}
+		ctx = sh.tagRPC(ctx)
+		sh.begin(ctx, true)
+	}
+
 	ctx, cancel := context.WithCancel(ctx)
 	// backpressure comes from tiny buffer, in lieu of HTTP/2 flow control
 	requests := make(chan frame, 1)
@@ -357,15 +426,26 @@ func (c *Channel) NewStream(ctx context.Context, desc *grpc.StreamDesc, method s
 		defer svrCancel()
 
 		serverStream := &inProcessServerStream{
-			cloner:    cloner,
-			requests:  requests,
-			responses: responses,
-			onDone:    svrDoneCancel,
+			cloner:       cloner,
+			requests:     requests,
+			responses:    responses,
+			onDone:       svrDoneCancel,
+			statsHandler: sh,
 		}
 		sts := &internal.ServerTransportStream{Name: method, Stream: serverStream}
 		serverStream.ctx = grpc.NewContextWithServerTransportStream(svrCtx, sts)
+
+		// Server-side stats
+		if sh != nil {
+			serverStream.ctx = sh.tagRPC(serverStream.ctx)
+			sh.begin(serverStream.ctx, false)
+		}
+
 		var err error
 		defer func() {
+			if sh != nil {
+				sh.end(serverStream.ctx, false, err)
+			}
 			serverStream.finish(err)
 		}()
 
@@ -388,9 +468,11 @@ func (c *Channel) NewStream(ctx context.Context, desc *grpc.StreamDesc, method s
 		responses:      responses,
 		responseStream: desc.ServerStreams,
 		copts:          copts,
+		statsHandler:   sh,
+		cancel:         cancel,
 	}
 	runtime.SetFinalizer(cs, func(stream *inProcessClientStream) {
-		cancel()
+		stream.cancel()
 	})
 	return cs, nil
 }
@@ -461,10 +543,11 @@ const (
 // communicate request and response messages from/to the client (which runs in a
 // separate goroutine).
 type inProcessServerStream struct {
-	ctx      context.Context
-	onDone   context.CancelFunc
-	cloner   Cloner
-	requests <-chan frame
+	ctx          context.Context
+	onDone       context.CancelFunc
+	cloner       Cloner
+	requests     <-chan frame
+	statsHandler *statsHandlerHelper
 
 	mu        sync.Mutex
 	headers   metadata.MD
@@ -501,6 +584,9 @@ func (s *inProcessServerStream) setHeader(md metadata.MD, send bool) error {
 
 func (s *inProcessServerStream) sendHeadersLocked() error {
 	if len(s.headers) > 0 {
+		if s.statsHandler != nil {
+			s.statsHandler.outHeader(s.ctx, s.headers)
+		}
 		if err := writeMessage(s.ctx, nil, s.responses, frame{headers: s.headers}); err != nil {
 			return err
 		}
@@ -521,10 +607,16 @@ func (s *inProcessServerStream) finish(err error) {
 	}()
 
 	if s.state == streamStateHeaders && len(s.headers) > 0 {
+		if s.statsHandler != nil {
+			s.statsHandler.outHeader(s.ctx, s.headers)
+		}
 		_ = writeMessage(s.ctx, nil, s.responses, frame{headers: s.headers})
 	}
 
 	if len(s.trailers) > 0 {
+		if s.statsHandler != nil {
+			s.statsHandler.outTrailer(s.ctx, s.trailers)
+		}
 		_ = writeMessage(s.ctx, nil, s.responses, frame{trailers: s.trailers})
 	}
 	s.trailers = nil
@@ -577,6 +669,9 @@ func (s *inProcessServerStream) SendMsg(m interface{}) error {
 	if err != nil {
 		return err
 	}
+	if s.statsHandler != nil {
+		s.statsHandler.outPayload(s.ctx, m)
+	}
 	return writeMessage(s.ctx, nil, s.responses, frame{data: m})
 }
 
@@ -587,6 +682,9 @@ func (s *inProcessServerStream) RecvMsg(m interface{}) error {
 	}
 	if resp.err != nil {
 		return resp.err
+	}
+	if s.statsHandler != nil {
+		s.statsHandler.inPayload(s.ctx, resp.data)
 	}
 	return s.cloner.Copy(m, resp.data)
 }
@@ -601,6 +699,8 @@ type inProcessClientStream struct {
 	svrCtx         context.Context
 	copts          *internal.CallOptions
 	responseStream bool
+	statsHandler   *statsHandlerHelper
+	cancel         context.CancelFunc
 
 	respMu    sync.Mutex
 	responses <-chan frame // guarded by respMu so messages can be safely peeked into last
@@ -608,6 +708,7 @@ type inProcessClientStream struct {
 	last      *frame
 	headers   metadata.MD
 	trailers  metadata.MD
+	ended     bool // track if we've already called end on stats handler
 
 	reqMu      sync.Mutex
 	sendClosed bool
@@ -631,9 +732,15 @@ func (s *inProcessClientStream) Header() (metadata.MD, error) {
 			case kindHeaders:
 				s.headers = m.headers
 				s.copts.SetHeaders(s.headers)
+				if s.statsHandler != nil {
+					s.statsHandler.inHeader(s.ctx, s.headers)
+				}
 			case kindTrailers:
 				s.trailers = m.trailers
 				s.copts.SetTrailers(s.trailers)
+				if s.statsHandler != nil {
+					s.statsHandler.inTrailer(s.ctx, s.trailers, nil)
+				}
 			case kindError:
 				s.state = streamStateClosed
 				fallthrough
@@ -684,6 +791,9 @@ func (s *inProcessClientStream) SendMsg(m interface{}) error {
 	if err != nil {
 		return err
 	}
+	if s.statsHandler != nil {
+		s.statsHandler.outPayload(s.ctx, m)
+	}
 	return writeMessage(s.ctx, s.svrCtx, s.requests, frame{data: m})
 }
 
@@ -700,6 +810,9 @@ func (s *inProcessClientStream) recvMsgLocked(m interface{}, lastMessage bool) e
 		case kindData:
 			err := s.cloner.Copy(m, s.last.data)
 			if err == nil {
+				if s.statsHandler != nil {
+					s.statsHandler.inPayload(s.ctx, s.last.data)
+				}
 				s.last = nil
 				if lastMessage {
 					err = s.ensureNoMoreLocked(m)
@@ -708,6 +821,7 @@ func (s *inProcessClientStream) recvMsgLocked(m interface{}, lastMessage bool) e
 			return err
 		case kindError:
 			s.state = streamStateClosed
+			s.callEndOnce(s.last.err)
 			return internal.TranslateContextError(s.last.err)
 		}
 	}
@@ -717,6 +831,7 @@ func (s *inProcessClientStream) recvMsgLocked(m interface{}, lastMessage bool) e
 		if err != nil {
 			if err == io.EOF {
 				s.state = streamStateClosed
+				s.callEndOnce(nil)
 			}
 			return internal.TranslateContextError(err)
 		}
@@ -725,20 +840,39 @@ func (s *inProcessClientStream) recvMsgLocked(m interface{}, lastMessage bool) e
 			s.state = streamStateMessages
 			s.headers = r.headers
 			s.copts.SetHeaders(s.headers)
+			if s.statsHandler != nil {
+				s.statsHandler.inHeader(s.ctx, s.headers)
+			}
 		case kindTrailers:
 			s.trailers = r.trailers
 			s.copts.SetTrailers(s.trailers)
+			if s.statsHandler != nil {
+				s.statsHandler.inTrailer(s.ctx, s.trailers, nil)
+			}
 		case kindError:
 			s.state = streamStateClosed
 			s.last = &r
+			s.callEndOnce(r.err)
 			return internal.TranslateContextError(r.err)
 		case kindData:
 			err := s.cloner.Copy(m, r.data)
-			if err == nil && lastMessage {
-				err = s.ensureNoMoreLocked(m)
+			if err == nil {
+				if s.statsHandler != nil {
+					s.statsHandler.inPayload(s.ctx, r.data)
+				}
+				if lastMessage {
+					err = s.ensureNoMoreLocked(m)
+				}
 			}
 			return err
 		}
+	}
+}
+
+func (s *inProcessClientStream) callEndOnce(err error) {
+	if !s.ended && s.statsHandler != nil {
+		s.statsHandler.end(s.ctx, true, err)
+		s.ended = true
 	}
 }
 
@@ -789,4 +923,81 @@ func isNil(m interface{}) bool {
 	}
 	rv := reflect.ValueOf(m)
 	return rv.Kind() == reflect.Ptr && rv.IsNil()
+}
+
+// statsHandlerHelper encapsulates logic for invoking stats handler methods
+// for both client-side and server-side of an RPC.
+type statsHandlerHelper struct {
+	handler        stats.Handler
+	method         string
+	isClientStream bool
+	isServerStream bool
+}
+
+func (sh *statsHandlerHelper) tagRPC(ctx context.Context) context.Context {
+	return sh.handler.TagRPC(ctx, &stats.RPCTagInfo{
+		FullMethodName: sh.method,
+	})
+}
+
+func (sh *statsHandlerHelper) begin(ctx context.Context, isClient bool) {
+	sh.handler.HandleRPC(ctx, &stats.Begin{
+		Client:         isClient,
+		BeginTime:      time.Now(),
+		IsClientStream: sh.isClientStream,
+		IsServerStream: sh.isServerStream,
+	})
+}
+
+func (sh *statsHandlerHelper) end(ctx context.Context, isClient bool, err error) {
+	sh.handler.HandleRPC(ctx, &stats.End{
+		Client:  isClient,
+		EndTime: time.Now(),
+		Error:   err,
+	})
+}
+
+func (sh *statsHandlerHelper) inHeader(ctx context.Context, md metadata.MD) {
+	sh.handler.HandleRPC(ctx, &stats.InHeader{
+		Header:     md,
+		WireLength: 0, // in-process has no wire encoding
+	})
+}
+
+func (sh *statsHandlerHelper) inPayload(ctx context.Context, payload interface{}) {
+	sh.handler.HandleRPC(ctx, &stats.InPayload{
+		Payload:    payload,
+		Length:     0, // in-process has no wire encoding
+		WireLength: 0,
+		RecvTime:   time.Now(),
+	})
+}
+
+func (sh *statsHandlerHelper) inTrailer(ctx context.Context, md metadata.MD, err error) {
+	sh.handler.HandleRPC(ctx, &stats.InTrailer{
+		Trailer:    md,
+		WireLength: 0, // in-process has no wire encoding
+	})
+}
+
+func (sh *statsHandlerHelper) outHeader(ctx context.Context, md metadata.MD) {
+	sh.handler.HandleRPC(ctx, &stats.OutHeader{
+		Header: md,
+	})
+}
+
+func (sh *statsHandlerHelper) outPayload(ctx context.Context, payload interface{}) {
+	sh.handler.HandleRPC(ctx, &stats.OutPayload{
+		Payload:    payload,
+		Length:     0, // in-process has no wire encoding
+		WireLength: 0,
+		SentTime:   time.Now(),
+	})
+}
+
+func (sh *statsHandlerHelper) outTrailer(ctx context.Context, md metadata.MD) {
+	sh.handler.HandleRPC(ctx, &stats.OutTrailer{
+		Trailer:    md,
+		WireLength: 0, // deprecated field, but set to 0 for consistency
+	})
 }
