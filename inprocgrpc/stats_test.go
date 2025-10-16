@@ -47,7 +47,8 @@ func TestStatsHandlerUnary(t *testing.T) {
 	handler := &testStatsHandler{}
 
 	channel := &inprocgrpc.Channel{}
-	channel = channel.WithStatsHandler(handler)
+	channel = channel.WithClientStatsHandler(handler)
+	channel = channel.WithServerStatsHandler(handler)
 
 	svc := &grpchantesting.TestServer{}
 	grpchantesting.RegisterTestServiceServer(channel, svc)
@@ -107,7 +108,8 @@ func TestStatsHandlerStreaming(t *testing.T) {
 	handler := &testStatsHandler{}
 
 	channel := &inprocgrpc.Channel{}
-	channel = channel.WithStatsHandler(handler)
+	channel = channel.WithClientStatsHandler(handler)
+	channel = channel.WithServerStatsHandler(handler)
 
 	svc := &grpchantesting.TestServer{}
 	grpchantesting.RegisterTestServiceServer(channel, svc)
@@ -193,7 +195,8 @@ func TestStatsHandlerError(t *testing.T) {
 	handler := &testStatsHandler{}
 
 	channel := &inprocgrpc.Channel{}
-	channel = channel.WithStatsHandler(handler)
+	channel = channel.WithClientStatsHandler(handler)
+	channel = channel.WithServerStatsHandler(handler)
 
 	svc := &grpchantesting.TestServer{}
 	grpchantesting.RegisterTestServiceServer(channel, svc)
