@@ -3,12 +3,16 @@ package httpgrpc
 import (
 	"encoding/base64"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
-	"google.golang.org/grpc/mem"
 	"io"
 	"math"
 	"net/http"
 	"strings"
+
+	"github.com/fullstorydev/grpchan/internal/sse"
+	grpcproto "google.golang.org/grpc/encoding/proto"
+	"google.golang.org/grpc/mem"
 
 	"google.golang.org/grpc/encoding"
 	"google.golang.org/grpc/metadata"
@@ -155,3 +159,184 @@ func (a strAddr) Network() string {
 }
 
 func (a strAddr) String() string { return string(a) }
+
+type streamReader func() (streamMsg, error)
+
+type streamWriter func(m any, isTrailer bool) error
+
+type flusher interface {
+	Flush() error
+}
+
+func getServerStreamWriter(mediaType string, w io.Writer, flusher flusher) (streamWriter, string) {
+	if mediaType == StreamRpcContentType_V1 {
+		codec := encoding.GetCodecV2(grpcproto.Name)
+		return newSizePrefixedWriter(w, codec), StreamRpcContentType_V1
+	}
+
+	if mediaType == ApplicationJson {
+		codec := encoding.GetCodecV2("json")
+		return newSSEWriter(w, flusher, codec), EventStreamContentType
+	}
+
+	return nil, ""
+}
+
+func getServerStreamReader(mediaType string, r io.Reader) streamReader {
+	if mediaType == StreamRpcContentType_V1 {
+		codec := encoding.GetCodecV2(grpcproto.Name)
+		return newSizePrefixedReader(r, codec)
+	}
+
+	if mediaType == ApplicationJson {
+		codec := encoding.GetCodecV2("json")
+		return newJSONReader(r, codec)
+	}
+
+	return nil
+}
+
+func getClientStreamReader(mediaType string, r io.Reader) streamReader {
+	if mediaType == StreamRpcContentType_V1 {
+		codec := encoding.GetCodecV2(grpcproto.Name)
+		return newSizePrefixedReader(r, codec)
+	}
+
+	if mediaType == EventStreamContentType {
+		codec := encoding.GetCodecV2("json")
+		return newSSEReader(r, codec)
+	}
+
+	return nil
+}
+
+func getClientStreamWriter(mediaType string, w io.Writer) streamWriter {
+	if mediaType == StreamRpcContentType_V1 {
+		codec := encoding.GetCodecV2(grpcproto.Name)
+		return newSizePrefixedWriter(w, codec)
+	}
+
+	if mediaType == ApplicationJson {
+		codec := encoding.GetCodecV2("json")
+		return newJSONWriter(w, codec)
+	}
+
+	return nil
+}
+
+type streamMsg struct {
+	codec     encoding.CodecV2
+	data      []byte
+	isTrailer bool
+}
+
+func (s *streamMsg) Decode(m any) error {
+	return s.codec.Unmarshal(mem.BufferSlice{mem.SliceBuffer(s.data)}, m)
+}
+
+func newSizePrefixedReader(r io.Reader, codec encoding.CodecV2) func() (streamMsg, error) {
+	return func() (streamMsg, error) {
+		size, err := readSizePreface(r)
+		if err != nil {
+			return streamMsg{}, err
+		}
+
+		isTrailer := size < 0
+		if isTrailer {
+			size = -size
+		}
+
+		data := make([]byte, size)
+		_, err = io.ReadAtLeast(r, data, int(size))
+		if err != nil {
+			return streamMsg{}, err
+		}
+
+		return streamMsg{
+			codec:     codec,
+			data:      data,
+			isTrailer: isTrailer,
+		}, nil
+	}
+}
+
+func newSizePrefixedWriter(w io.Writer, codec encoding.CodecV2) func(m any, isTrailer bool) error {
+	return func(m any, isTrailer bool) error {
+		return writeProtoMessage(w, codec, m, isTrailer)
+	}
+}
+
+func newJSONReader(r io.Reader, codec encoding.CodecV2) func() (streamMsg, error) {
+	d := json.NewDecoder(r)
+	return func() (streamMsg, error) {
+		var msg json.RawMessage
+		if err := d.Decode(&msg); err != nil {
+			return streamMsg{}, err
+		}
+
+		return streamMsg{
+			codec: codec,
+			data:  msg,
+		}, nil
+	}
+}
+
+func newJSONWriter(w io.Writer, codec encoding.CodecV2) func(m any, isTrailer bool) error {
+	return func(m any, isTrailer bool) error {
+		if isTrailer {
+			panic("trailers are not supported for JSON")
+		}
+
+		data, err := codec.Marshal(m)
+		if err != nil {
+			return err
+		}
+
+		_, err = w.Write(data.Materialize())
+		return err
+	}
+}
+
+func newSSEWriter(w io.Writer, flusher flusher, codec encoding.CodecV2) func(m any, isTrailer bool) error {
+	e := sse.NewEncoder(w)
+	return func(m any, isTrailer bool) error {
+		data, err := codec.Marshal(m)
+		if err != nil {
+			return err
+		}
+
+		if isTrailer {
+			if err := e.Encode(&sse.Event{
+				Type: "trailer",
+				Data: data.Materialize(),
+			}); err != nil {
+				return err
+			}
+		} else {
+			if err := e.Encode(&sse.Event{
+				Data: data.Materialize(),
+			}); err != nil {
+				return err
+			}
+		}
+
+		return flusher.Flush()
+	}
+}
+
+func newSSEReader(r io.Reader, codec encoding.CodecV2) func() (streamMsg, error) {
+	d := sse.NewDecoder(r)
+
+	return func() (streamMsg, error) {
+		event, err := d.Decode()
+		if err != nil {
+			return streamMsg{}, err
+		}
+
+		return streamMsg{
+			codec:     codec,
+			data:      event.Data,
+			isTrailer: event.Type == "trailer",
+		}, nil
+	}
+}

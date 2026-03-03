@@ -40,9 +40,13 @@ const (
 
 const (
 	// Non-standard and experimental; uses the `jsonpb.Marshaler` by default.
-	// Only unary calls are supported; streams with JSON encoding are not supported.
 	// Use `encoding.RegisterCodecV2` to override the default encoder with a custom encoder.
+	// Unary calls use JSON encoding for the request and response. Streaming calls from the
+	// client to the server use JSON encoding with mutiple values. Streaming calls from the
+	// server to the client use SSE encoding with multiple events.
 	ApplicationJson = "application/json"
+
+	EventStreamContentType = "text/event-stream"
 )
 
 func getUnaryCodec(contentType string) encoding.CodecV2 {
@@ -56,24 +60,6 @@ func getUnaryCodec(contentType string) encoding.CodecV2 {
 
 	if mediaType == ApplicationJson {
 		return encoding.GetCodecV2("json")
-	}
-
-	return nil
-}
-
-func getStreamingCodec(contentType string) encoding.CodecV2 {
-	// Ignore any errors or charsets for now, just parse the main type.
-	// TODO: should this be more picky / return an error?  Maybe charset utf8 only?
-	mediaType, _, _ := mime.ParseMediaType(contentType)
-
-	if mediaType == StreamRpcContentType_V1 {
-		return encoding.GetCodecV2(grpcproto.Name)
-	}
-
-	if mediaType == ApplicationJson {
-		// TODO: support half-duplix JSON streaming?
-		// https://en.wikipedia.org/wiki/JSON_streaming#Record_separator-delimited_JSON
-		return nil
 	}
 
 	return nil

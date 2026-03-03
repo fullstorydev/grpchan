@@ -6,9 +6,9 @@ import (
 	"crypto/tls"
 	"encoding/base64"
 	"fmt"
-	"google.golang.org/grpc/mem"
 	"io"
 	"io/ioutil"
+	"mime"
 	"net/http"
 	"net/textproto"
 	"net/url"
@@ -19,12 +19,12 @@ import (
 	"sync"
 	"time"
 
+	"google.golang.org/grpc/mem"
+
 	spb "google.golang.org/genproto/googleapis/rpc/status"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/encoding"
-	grpcproto "google.golang.org/grpc/encoding/proto"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
@@ -40,8 +40,40 @@ import (
 //
 // It implements version 1 of the GRPC-over-HTTP transport protocol.
 type Channel struct {
-	Transport http.RoundTripper
-	BaseURL   *url.URL
+	Transport   http.RoundTripper
+	BaseURL     *url.URL
+	ContentType ContentType
+}
+
+type ContentType int
+
+const (
+	// ContentTypeProto uses binary encoded proto messages over the channel.
+	ContentTypeProto ContentType = iota
+
+	// ContentTypeJSON uses JSON-encoded messages over the channel. For unary calls,
+	// the request and response are JSON values. For streaming calls, the request is
+	// a series of JSON values and the response is SSE events containing JSON values.
+	// This is primariy intended for testing the SSE streaming server implementation.
+	ContentTypeJSON
+)
+
+func (c *Channel) getUnaryContentType() string {
+	switch c.ContentType {
+	case ContentTypeJSON:
+		return ApplicationJson
+	default:
+		return UnaryRpcContentType_V1
+	}
+}
+
+func (c *Channel) getStreamingContentType() string {
+	switch c.ContentType {
+	case ContentTypeJSON:
+		return ApplicationJson
+	default:
+		return StreamRpcContentType_V1
+	}
 }
 
 var _ grpc.ClientConnInterface = (*Channel)(nil)
@@ -61,9 +93,11 @@ func (ch *Channel) Invoke(ctx context.Context, methodName string, req, resp inte
 		return err
 	}
 	h := headersFromContext(ctx)
-	h.Set("Content-Type", UnaryRpcContentType_V1)
 
-	codec := encoding.GetCodecV2(grpcproto.Name)
+	contentType := ch.getUnaryContentType()
+	h.Set("Content-Type", contentType)
+
+	codec := getUnaryCodec(contentType)
 	buf, err := codec.Marshal(req)
 	if err != nil {
 		return err
@@ -134,8 +168,10 @@ func (ch *Channel) NewStream(ctx context.Context, desc *grpc.StreamDesc, methodN
 
 	ctx, cancel := context.WithCancel(ctx)
 
+	contentType := ch.getStreamingContentType()
+
 	h := headersFromContext(ctx)
-	h.Set("Content-Type", StreamRpcContentType_V1)
+	h.Set("Content-Type", contentType)
 
 	// Intercept r.Close() so we can control the error sent across to the writer thread.
 	r, w := io.Pipe()
@@ -146,7 +182,7 @@ func (ch *Channel) NewStream(ctx context.Context, desc *grpc.StreamDesc, methodN
 	}
 	req.Header = h
 
-	cs := newClientStream(ctx, cancel, w, desc.ServerStreams, copts, ch.BaseURL)
+	cs := newClientStream(ctx, cancel, w, desc.ServerStreams, copts, ch.BaseURL, contentType)
 	go cs.doHttpCall(ch.Transport, req, r)
 
 	// ensure that context is cancelled, even if caller
@@ -211,7 +247,8 @@ type clientStream struct {
 	cancel  context.CancelFunc
 	copts   *internal.CallOptions
 	baseUrl *url.URL
-	codec   encoding.CodecV2
+
+	streamWriter streamWriter
 
 	// respStream is set to indicate whether client expects stream response; unary if false
 	respStream bool
@@ -224,7 +261,7 @@ type clientStream struct {
 	// rCh is used to deliver messages from doHttpCall goroutine
 	// to callers of RecvMsg.
 	// done must be set to true before it is closed
-	rCh chan []byte
+	rCh chan streamMsg
 
 	// rMu protects done, rErr, and tr
 	rMu  sync.RWMutex
@@ -238,16 +275,27 @@ type clientStream struct {
 	wErr error
 }
 
-func newClientStream(ctx context.Context, cancel context.CancelFunc, w io.WriteCloser, recvStream bool, copts *internal.CallOptions, baseUrl *url.URL) *clientStream {
+func newClientStream(
+	ctx context.Context,
+	cancel context.CancelFunc,
+	w io.WriteCloser,
+	recvStream bool,
+	copts *internal.CallOptions,
+	baseUrl *url.URL,
+	contentType string,
+) *clientStream {
 	cs := &clientStream{
-		ctx:        ctx,
-		cancel:     cancel,
-		copts:      copts,
-		baseUrl:    baseUrl,
-		codec:      encoding.GetCodecV2(grpcproto.Name),
-		w:          w,
-		respStream: recvStream,
-		rCh:        make(chan []byte),
+		ctx:          ctx,
+		cancel:       cancel,
+		copts:        copts,
+		baseUrl:      baseUrl,
+		streamWriter: getClientStreamWriter(contentType, w),
+		w:            w,
+		respStream:   recvStream,
+		rCh:          make(chan streamMsg),
+	}
+	if cs.streamWriter == nil {
+		panic(fmt.Sprintf("unsupported media type: %s", contentType))
 	}
 	cs.ready.Add(1)
 	return cs
@@ -319,7 +367,7 @@ func (cs *clientStream) SendMsg(m interface{}) error {
 		return io.EOF
 	}
 
-	cs.wErr = writeProtoMessage(cs.w, cs.codec, m, false)
+	cs.wErr = cs.streamWriter(m, false)
 	return cs.wErr
 }
 
@@ -340,7 +388,7 @@ func (cs *clientStream) RecvMsg(m interface{}) error {
 			}
 			return err
 		}
-		err := cs.codec.Unmarshal(mem.BufferSlice{mem.SliceBuffer(msg)}, m)
+		err := msg.Decode(m)
 		if err != nil {
 			return status.Error(codes.Internal, fmt.Sprintf("server sent invalid message: %v", err))
 		}
@@ -446,21 +494,33 @@ func (cs *clientStream) doHttpCall(transport http.RoundTripper, req *http.Reques
 		return
 	}
 
+	contentType := reply.Header.Get("Content-Type")
+	mediaType, _, _ := mime.ParseMediaType(contentType)
+	streamReader := getClientStreamReader(mediaType, reply.Body)
+
+	if streamReader == nil {
+		onReady(status.Error(codes.Internal, fmt.Sprintf("unsupported media type: %s", mediaType)), nil)
+		return
+	}
+
 	counter := 0
 	for {
 		// TODO: enforce max send and receive size in call options
 
 		counter++
-		var sz int32
-		sz, rErr = readSizePreface(reply.Body)
+		var msg streamMsg
+		msg, rErr = streamReader()
 		if rErr != nil {
+			if rErr == io.EOF {
+				rErr = io.ErrUnexpectedEOF
+			}
 			return
 		}
-		if sz < 0 {
+		if msg.isTrailer {
 			// final message is a trailer (need lock to write to cs.tr)
 			cs.rMu.Lock()
 			rMuHeld = true // defer above will unlock for us
-			cs.rErr = readProtoMessage(reply.Body, cs.codec, int32(-sz), &cs.tr)
+			cs.rErr = msg.Decode(&cs.tr)
 			if cs.rErr != nil {
 				if cs.rErr == io.EOF {
 					cs.rErr = io.ErrUnexpectedEOF
@@ -468,14 +528,6 @@ func (cs *clientStream) doHttpCall(transport http.RoundTripper, req *http.Reques
 			}
 			if len(cs.tr.Metadata) > 0 && len(cs.copts.Trailers) > 0 {
 				cs.copts.SetTrailers(metadataFromProto(cs.tr.Metadata))
-			}
-			return
-		}
-		msg := make([]byte, sz)
-		_, rErr = io.ReadAtLeast(reply.Body, msg, int(sz))
-		if rErr != nil {
-			if rErr == io.EOF {
-				rErr = io.ErrUnexpectedEOF
 			}
 			return
 		}

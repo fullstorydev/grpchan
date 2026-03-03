@@ -5,19 +5,22 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
-	"google.golang.org/grpc/mem"
 	"io"
 	"io/ioutil"
+	"mime"
 	"net/http"
 	"path"
 	"strconv"
 	"sync"
 	"time"
 
+	"google.golang.org/grpc/mem"
+
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/encoding"
+	grpcproto "google.golang.org/grpc/encoding/proto"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
@@ -38,8 +41,10 @@ type Server struct {
 	opts      handlerOpts
 }
 
-var _ http.Handler = (*Server)(nil)
-var _ grpc.ServiceRegistrar = (*Server)(nil)
+var (
+	_ http.Handler          = (*Server)(nil)
+	_ grpc.ServiceRegistrar = (*Server)(nil)
+)
 
 // ServerOption is an option used when constructing a NewServer.
 type ServerOption interface {
@@ -301,8 +306,9 @@ func handleMethod(svr interface{}, serviceName string, desc *grpc.MethodDesc, un
 			}
 			statProto := st.Proto()
 			w.Header().Set("X-GRPC-Status", fmt.Sprintf("%d:%s", statProto.Code, statProto.Message))
+			protoCodec := encoding.GetCodecV2(grpcproto.Name)
 			for _, d := range statProto.Details {
-				buf, err := codec.Marshal(d)
+				buf, err := protoCodec.Marshal(d)
 				if err != nil {
 					continue
 				}
@@ -356,8 +362,17 @@ func handleStream(svr interface{}, serviceName string, desc *grpc.StreamDesc, st
 		}
 
 		contentType := r.Header.Get("Content-Type")
-		codec := getStreamingCodec(contentType)
-		if codec == nil {
+
+		mediaType, _, _ := mime.ParseMediaType(contentType)
+
+		streamWriter, resContentType := getServerStreamWriter(mediaType, w, http.NewResponseController(w))
+		if streamWriter == nil {
+			writeError(w, http.StatusUnsupportedMediaType)
+			return
+		}
+
+		streamReader := getServerStreamReader(mediaType, r.Body)
+		if streamReader == nil {
 			writeError(w, http.StatusUnsupportedMediaType)
 			return
 		}
@@ -369,9 +384,9 @@ func handleStream(svr interface{}, serviceName string, desc *grpc.StreamDesc, st
 		}
 		defer cancel()
 
-		w.Header().Set("Content-Type", contentType)
+		w.Header().Set("Content-Type", resContentType)
 
-		str := &serverStream{r: r, w: w, respStream: desc.ClientStreams, codec: codec}
+		str := &serverStream{r: r, w: w, respStream: desc.ClientStreams, streamWriter: streamWriter, streamReader: streamReader}
 		sts := internal.ServerTransportStream{Name: info.FullMethod, Stream: str}
 		str.ctx = grpc.NewContextWithServerTransportStream(ctx, &sts)
 		if streamInt != nil {
@@ -404,7 +419,7 @@ func handleStream(svr interface{}, serviceName string, desc *grpc.StreamDesc, st
 			tr.Details = statProto.Details
 		}
 
-		writeProtoMessage(w, codec, &tr, true)
+		streamWriter(&tr, true)
 	}
 }
 
@@ -456,7 +471,9 @@ type serverStream struct {
 	ctx context.Context
 	// respStream is set to indicate whether client expects stream response; unary if false
 	respStream bool
-	codec      encoding.CodecV2
+
+	streamWriter streamWriter
+	streamReader streamReader
 
 	// rmu serializes access to r and protects recvd
 	rmu sync.Mutex
@@ -522,7 +539,7 @@ func (s *serverStream) SendMsg(m interface{}) error {
 	}
 
 	s.headersSent = true // sent implicitly
-	err := writeProtoMessage(s.w, s.codec, m, false)
+	err := s.streamWriter(m, false)
 	if err != nil {
 		s.writeFailed = true
 	}
@@ -539,21 +556,17 @@ func (s *serverStream) RecvMsg(m interface{}) error {
 
 	s.recvd++
 
-	size, err := readSizePreface(s.r.Body)
+	msg, err := s.streamReader()
 	if err != nil {
 		return err
 	}
 
-	err = readProtoMessage(s.r.Body, s.codec, size, m)
-	if err == io.EOF {
-		return io.ErrUnexpectedEOF
-	} else if err != nil {
+	if err := msg.Decode(m); err != nil {
 		return err
 	}
 
 	if !s.respStream {
-		_, err = readSizePreface(s.r.Body)
-		if err != io.EOF {
+		if _, err := s.streamReader(); err != io.EOF {
 			// client tried to send >1 message!
 			return status.Error(codes.InvalidArgument, "method accepts 1 request message but client sent >1")
 		}
