@@ -72,24 +72,6 @@ func readSizePreface(in io.Reader) (int32, error) {
 	return sz, err
 }
 
-// readProtoMessage reads data from the given reader and decodes it into the given
-// message. The sz parameter indicates the  number of bytes that must be read to
-// decode the proto. This does not first call readSizePreface; callers must do that
-// first.
-func readProtoMessage(in io.Reader, codec encoding.CodecV2, sz int32, m interface{}) error {
-	if sz < 0 {
-		return fmt.Errorf("bad size preface: size cannot be negative: %d", sz)
-	} else if sz > maxMessageSize {
-		return fmt.Errorf("bad size preface: indicated size is too large: %d", sz)
-	}
-	msg := make([]byte, sz)
-	_, err := io.ReadAtLeast(in, msg, int(sz))
-	if err != nil {
-		return err
-	}
-	return codec.Unmarshal(mem.BufferSlice{mem.SliceBuffer(msg)}, m)
-}
-
 // asMetadata converts the given HTTP headers into GRPC metadata.
 func asMetadata(header http.Header) (metadata.MD, error) {
 	// metadata has same shape as http.Header,
@@ -244,6 +226,10 @@ func newSizePrefixedReader(r io.Reader, codec encoding.CodecV2) func() (streamMs
 		isTrailer := size < 0
 		if isTrailer {
 			size = -size
+		}
+
+		if size > maxMessageSize {
+			return streamMsg{}, fmt.Errorf("bad size preface: indicated size is too large: %d", size)
 		}
 
 		data := make([]byte, size)
