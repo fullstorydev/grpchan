@@ -34,46 +34,48 @@ import (
 	"github.com/fullstorydev/grpchan/internal"
 )
 
+// ChannelOption is a function that can be used to configure a Channel.
+type ChannelOption func(*channelOptions)
+
+type channelOptions struct {
+	// TODO(kellegous): It would be ideal if this were refactored into a protocol abstraction that encapsulates the message-level codec and the framing strategy
+	// into a single object. That would all us to have size-prefixed proto, json+see, connectRPC ... anything else.
+	useJSONEncoding bool
+}
+
+// WithJSONEncoding configures the channel to use JSON encoding between the client and server.
+// For unary calls, the request and response are JSON values. For streaming calls, the request is
+// a series of JSON values and the response is SSE events containing JSON values.
+func WithJSONEncoding(useJSONEncoding bool) ChannelOption {
+	return func(o *channelOptions) {
+		o.useJSONEncoding = useJSONEncoding
+	}
+}
+
+// NewChannel creates a new Channel with the given base URL and transport.
+// The ChannelOption functions can be used to configure the Channel.
+func NewChannel(baseURL *url.URL, transport http.RoundTripper, opts ...ChannelOption) *Channel {
+	c := &Channel{
+		BaseURL:   baseURL,
+		Transport: transport,
+	}
+
+	for _, opt := range opts {
+		opt(&c.channelOptions)
+	}
+
+	return c
+}
+
 // Channel is used as a connection for GRPC requests issued over HTTP 1.1. The
 // server endpoint is configured using the BaseURL field, and the Transport can
 // also be configured. Both of those fields must be specified.
 //
 // It implements version 1 of the GRPC-over-HTTP transport protocol.
 type Channel struct {
-	Transport   http.RoundTripper
-	BaseURL     *url.URL
-	ContentType ContentType
-}
-
-type ContentType int
-
-const (
-	// ContentTypeProto uses binary encoded proto messages over the channel.
-	ContentTypeProto ContentType = iota
-
-	// ContentTypeJSON uses JSON-encoded messages over the channel. For unary calls,
-	// the request and response are JSON values. For streaming calls, the request is
-	// a series of JSON values and the response is SSE events containing JSON values.
-	// This is primariy intended for testing the SSE streaming server implementation.
-	ContentTypeJSON
-)
-
-func (c *Channel) getUnaryContentType() string {
-	switch c.ContentType {
-	case ContentTypeJSON:
-		return ApplicationJson
-	default:
-		return UnaryRpcContentType_V1
-	}
-}
-
-func (c *Channel) getStreamingContentType() string {
-	switch c.ContentType {
-	case ContentTypeJSON:
-		return ApplicationJson
-	default:
-		return StreamRpcContentType_V1
-	}
+	Transport http.RoundTripper
+	BaseURL   *url.URL
+	channelOptions
 }
 
 var _ grpc.ClientConnInterface = (*Channel)(nil)
@@ -92,12 +94,8 @@ func (ch *Channel) Invoke(ctx context.Context, methodName string, req, resp inte
 	if err != nil {
 		return err
 	}
-	h := headersFromContext(ctx)
 
-	contentType := ch.getUnaryContentType()
-	h.Set("Content-Type", contentType)
-
-	codec := getUnaryCodec(contentType)
+	h, codec := getHeadersAndCodecForClientUnaryRequest(ctx, ch.useJSONEncoding)
 	buf, err := codec.Marshal(req)
 	if err != nil {
 		return err
@@ -168,10 +166,7 @@ func (ch *Channel) NewStream(ctx context.Context, desc *grpc.StreamDesc, methodN
 
 	ctx, cancel := context.WithCancel(ctx)
 
-	contentType := ch.getStreamingContentType()
-
-	h := headersFromContext(ctx)
-	h.Set("Content-Type", contentType)
+	h, newStreamWriter := getHeadersAndCodecForClientStreamingRequest(ctx, ch.useJSONEncoding)
 
 	// Intercept r.Close() so we can control the error sent across to the writer thread.
 	r, w := io.Pipe()
@@ -182,7 +177,7 @@ func (ch *Channel) NewStream(ctx context.Context, desc *grpc.StreamDesc, methodN
 	}
 	req.Header = h
 
-	cs := newClientStream(ctx, cancel, w, desc.ServerStreams, copts, ch.BaseURL, contentType)
+	cs := newClientStream(ctx, cancel, w, desc.ServerStreams, copts, ch.BaseURL, newStreamWriter(w))
 	go cs.doHttpCall(ch.Transport, req, r)
 
 	// ensure that context is cancelled, even if caller
@@ -282,20 +277,17 @@ func newClientStream(
 	recvStream bool,
 	copts *internal.CallOptions,
 	baseUrl *url.URL,
-	contentType string,
+	streamWriter streamWriter,
 ) *clientStream {
 	cs := &clientStream{
 		ctx:          ctx,
 		cancel:       cancel,
 		copts:        copts,
 		baseUrl:      baseUrl,
-		streamWriter: getClientStreamWriter(contentType, w),
+		streamWriter: streamWriter,
 		w:            w,
 		respStream:   recvStream,
 		rCh:          make(chan streamMsg),
-	}
-	if cs.streamWriter == nil {
-		panic(fmt.Sprintf("unsupported media type: %s", contentType))
 	}
 	cs.ready.Add(1)
 	return cs

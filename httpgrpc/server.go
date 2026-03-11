@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
-	"mime"
 	"net/http"
 	"path"
 	"strconv"
@@ -266,7 +265,7 @@ func handleMethod(svr interface{}, serviceName string, desc *grpc.MethodDesc, un
 		}
 
 		contentType := r.Header.Get("Content-Type")
-		codec := getUnaryCodec(contentType)
+		codec := getCodecForServerUnaryResponse(contentType)
 		if codec == nil {
 			writeError(w, http.StatusUnsupportedMediaType)
 			return
@@ -363,16 +362,8 @@ func handleStream(svr interface{}, serviceName string, desc *grpc.StreamDesc, st
 
 		contentType := r.Header.Get("Content-Type")
 
-		mediaType, _, _ := mime.ParseMediaType(contentType)
-
-		streamWriter, resContentType := getServerStreamWriter(mediaType, w, http.NewResponseController(w))
-		if streamWriter == nil {
-			writeError(w, http.StatusUnsupportedMediaType)
-			return
-		}
-
-		streamReader := getServerStreamReader(mediaType, r.Body)
-		if streamReader == nil {
+		streamReader, streamWriter, resContentType := getServerStreamReaderAndWriter(contentType, r.Body, w, http.NewResponseController(w))
+		if streamReader == nil || streamWriter == nil {
 			writeError(w, http.StatusUnsupportedMediaType)
 			return
 		}

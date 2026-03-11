@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -11,7 +12,6 @@ import (
 	"strings"
 
 	"github.com/fullstorydev/grpchan/internal/sse"
-	grpcproto "google.golang.org/grpc/encoding/proto"
 	"google.golang.org/grpc/mem"
 
 	"google.golang.org/grpc/encoding"
@@ -69,6 +69,16 @@ func writeProtoMessage(w io.Writer, codec encoding.CodecV2, m interface{}, end b
 func readSizePreface(in io.Reader) (int32, error) {
 	var sz int32
 	err := binary.Read(in, binary.BigEndian, &sz)
+	if err != nil {
+		return 0, err
+	}
+	// Reject math.MinInt32: negating it overflows in two's complement and would
+	// mean that -size would remain negative and potentially cause a panic if the
+	// callers tries to allocate a buffer for the message.
+	if sz == math.MinInt32 {
+		return 0, errors.New("bad size preface: size overflow")
+	}
+
 	return sz, err
 }
 
@@ -150,62 +160,6 @@ type flusher interface {
 	Flush() error
 }
 
-func getServerStreamWriter(mediaType string, w io.Writer, flusher flusher) (streamWriter, string) {
-	if mediaType == StreamRpcContentType_V1 {
-		codec := encoding.GetCodecV2(grpcproto.Name)
-		return newSizePrefixedWriter(w, codec), StreamRpcContentType_V1
-	}
-
-	if mediaType == ApplicationJson {
-		codec := encoding.GetCodecV2("json")
-		return newSSEWriter(w, flusher, codec), EventStreamContentType
-	}
-
-	return nil, ""
-}
-
-func getServerStreamReader(mediaType string, r io.Reader) streamReader {
-	if mediaType == StreamRpcContentType_V1 {
-		codec := encoding.GetCodecV2(grpcproto.Name)
-		return newSizePrefixedReader(r, codec)
-	}
-
-	if mediaType == ApplicationJson {
-		codec := encoding.GetCodecV2("json")
-		return newJSONReader(r, codec)
-	}
-
-	return nil
-}
-
-func getClientStreamReader(mediaType string, r io.Reader) streamReader {
-	if mediaType == StreamRpcContentType_V1 {
-		codec := encoding.GetCodecV2(grpcproto.Name)
-		return newSizePrefixedReader(r, codec)
-	}
-
-	if mediaType == EventStreamContentType {
-		codec := encoding.GetCodecV2("json")
-		return newSSEReader(r, codec)
-	}
-
-	return nil
-}
-
-func getClientStreamWriter(mediaType string, w io.Writer) streamWriter {
-	if mediaType == StreamRpcContentType_V1 {
-		codec := encoding.GetCodecV2(grpcproto.Name)
-		return newSizePrefixedWriter(w, codec)
-	}
-
-	if mediaType == ApplicationJson {
-		codec := encoding.GetCodecV2("json")
-		return newJSONWriter(w, codec)
-	}
-
-	return nil
-}
-
 type streamMsg struct {
 	codec     encoding.CodecV2
 	data      []byte
@@ -234,7 +188,9 @@ func newSizePrefixedReader(r io.Reader, codec encoding.CodecV2) func() (streamMs
 
 		data := make([]byte, size)
 		_, err = io.ReadAtLeast(r, data, int(size))
-		if err != nil {
+		if errors.Is(err, io.EOF) { // io.EOF is returned if no bytes were read
+			return streamMsg{}, io.ErrUnexpectedEOF
+		} else if err != nil {
 			return streamMsg{}, err
 		}
 

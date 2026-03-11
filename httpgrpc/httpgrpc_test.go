@@ -128,18 +128,14 @@ func TestJSONSSEServer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to parse base URL: %v", err)
 	}
-	cc := httpgrpc.Channel{
-		Transport:   http.DefaultTransport,
-		BaseURL:     u,
-		ContentType: httpgrpc.ContentTypeJSON,
-	}
+	cc := httpgrpc.NewChannel(u, http.DefaultTransport, httpgrpc.WithJSONEncoding(true))
 
-	grpchantesting.RunChannelTestCases(t, &cc, false)
+	grpchantesting.RunChannelTestCases(t, cc, false)
 
 	t.Run("empty-trailer", func(t *testing.T) {
 		// test RPC w/ streaming response where trailer message is empty
 		// (e.g. no trailer metadata and code == 0 [OK])
-		cli := grpchantesting.NewTestServiceClient(&cc)
+		cli := grpchantesting.NewTestServiceClient(cc)
 		str, err := cli.ServerStream(context.Background(), &grpchantesting.Message{})
 		if err != nil {
 			t.Fatalf("failed to initiate server stream: %v", err)
