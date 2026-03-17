@@ -3,12 +3,16 @@ package httpgrpc
 import (
 	"encoding/base64"
 	"encoding/binary"
+	"encoding/json"
+	"errors"
 	"fmt"
-	"google.golang.org/grpc/mem"
 	"io"
 	"math"
 	"net/http"
 	"strings"
+
+	"github.com/fullstorydev/grpchan/internal/sse"
+	"google.golang.org/grpc/mem"
 
 	"google.golang.org/grpc/encoding"
 	"google.golang.org/grpc/metadata"
@@ -65,25 +69,17 @@ func writeProtoMessage(w io.Writer, codec encoding.CodecV2, m interface{}, end b
 func readSizePreface(in io.Reader) (int32, error) {
 	var sz int32
 	err := binary.Read(in, binary.BigEndian, &sz)
-	return sz, err
-}
-
-// readProtoMessage reads data from the given reader and decodes it into the given
-// message. The sz parameter indicates the  number of bytes that must be read to
-// decode the proto. This does not first call readSizePreface; callers must do that
-// first.
-func readProtoMessage(in io.Reader, codec encoding.CodecV2, sz int32, m interface{}) error {
-	if sz < 0 {
-		return fmt.Errorf("bad size preface: size cannot be negative: %d", sz)
-	} else if sz > maxMessageSize {
-		return fmt.Errorf("bad size preface: indicated size is too large: %d", sz)
-	}
-	msg := make([]byte, sz)
-	_, err := io.ReadAtLeast(in, msg, int(sz))
 	if err != nil {
-		return err
+		return 0, err
 	}
-	return codec.Unmarshal(mem.BufferSlice{mem.SliceBuffer(msg)}, m)
+	// Reject math.MinInt32: negating it overflows in two's complement and would
+	// mean that -size would remain negative and potentially cause a panic if the
+	// callers tries to allocate a buffer for the message.
+	if sz == math.MinInt32 {
+		return 0, errors.New("bad size preface: size overflow")
+	}
+
+	return sz, err
 }
 
 // asMetadata converts the given HTTP headers into GRPC metadata.
@@ -155,3 +151,134 @@ func (a strAddr) Network() string {
 }
 
 func (a strAddr) String() string { return string(a) }
+
+type streamReader func() (streamMsg, error)
+
+type streamWriter func(m any, isTrailer bool) error
+
+type flusher interface {
+	Flush() error
+}
+
+type streamMsg struct {
+	codec     encoding.CodecV2
+	data      []byte
+	isTrailer bool
+}
+
+func (s *streamMsg) Decode(m any) error {
+	return s.codec.Unmarshal(mem.BufferSlice{mem.SliceBuffer(s.data)}, m)
+}
+
+func newSizePrefixedReader(r io.Reader, codec encoding.CodecV2) func() (streamMsg, error) {
+	return func() (streamMsg, error) {
+		size, err := readSizePreface(r)
+		if err != nil {
+			return streamMsg{}, err
+		}
+
+		isTrailer := size < 0
+		if isTrailer {
+			size = -size
+		}
+
+		if size > maxMessageSize {
+			return streamMsg{}, fmt.Errorf("bad size preface: indicated size is too large: %d", size)
+		}
+
+		data := make([]byte, size)
+		_, err = io.ReadAtLeast(r, data, int(size))
+		if errors.Is(err, io.EOF) { // io.EOF is returned if no bytes were read
+			return streamMsg{}, io.ErrUnexpectedEOF
+		} else if err != nil {
+			return streamMsg{}, err
+		}
+
+		return streamMsg{
+			codec:     codec,
+			data:      data,
+			isTrailer: isTrailer,
+		}, nil
+	}
+}
+
+func newSizePrefixedWriter(w io.Writer, codec encoding.CodecV2) func(m any, isTrailer bool) error {
+	return func(m any, isTrailer bool) error {
+		return writeProtoMessage(w, codec, m, isTrailer)
+	}
+}
+
+func newJSONReader(r io.Reader, codec encoding.CodecV2) func() (streamMsg, error) {
+	d := json.NewDecoder(r)
+	return func() (streamMsg, error) {
+		var msg json.RawMessage
+		if err := d.Decode(&msg); err != nil {
+			return streamMsg{}, err
+		}
+
+		return streamMsg{
+			codec: codec,
+			data:  msg,
+		}, nil
+	}
+}
+
+func newJSONWriter(w io.Writer, codec encoding.CodecV2) func(m any, isTrailer bool) error {
+	return func(m any, isTrailer bool) error {
+		if isTrailer {
+			panic("trailers are not supported for JSON")
+		}
+
+		data, err := codec.Marshal(m)
+		if err != nil {
+			return err
+		}
+
+		_, err = w.Write(data.Materialize())
+		return err
+	}
+}
+
+func newSSEWriter(w io.Writer, flusher flusher, codec encoding.CodecV2) func(m any, isTrailer bool) error {
+	e := sse.NewEncoder(w)
+	return func(m any, isTrailer bool) error {
+		data, err := codec.Marshal(m)
+		if err != nil {
+			return err
+		}
+
+		if isTrailer {
+			if err := e.Encode(&sse.Event{
+				Type: "trailer",
+				Data: data.Materialize(),
+			}); err != nil {
+				return err
+			}
+		} else {
+			if err := e.Encode(&sse.Event{
+				Data: data.Materialize(),
+			}); err != nil {
+				return err
+			}
+		}
+
+		return flusher.Flush()
+	}
+}
+
+func newSSEReader(r io.Reader, codec encoding.CodecV2) func() (streamMsg, error) {
+	d := sse.NewDecoder(r)
+
+	return func() (streamMsg, error) {
+		event, err := d.Decode()
+		if err != nil {
+			return streamMsg{}, err
+		}
+
+		return streamMsg{
+			codec:     codec,
+			data:      event.Data,
+			isTrailer: event.Type == "trailer",
+		}, nil
+	}
+}

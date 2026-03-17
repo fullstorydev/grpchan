@@ -1,7 +1,10 @@
 package httpgrpc
 
 import (
+	"context"
+	"io"
 	"mime"
+	"net/http"
 
 	"google.golang.org/grpc/encoding"
 	grpcproto "google.golang.org/grpc/encoding/proto"
@@ -40,12 +43,18 @@ const (
 
 const (
 	// Non-standard and experimental; uses the `jsonpb.Marshaler` by default.
-	// Only unary calls are supported; streams with JSON encoding are not supported.
 	// Use `encoding.RegisterCodecV2` to override the default encoder with a custom encoder.
+	// Unary calls use JSON encoding for the request and response. Streaming calls from the
+	// client to the server use JSON encoding with mutiple values. Streaming calls from the
+	// server to the client use SSE encoding with multiple events.
 	ApplicationJson = "application/json"
+
+	EventStreamContentType = "text/event-stream"
 )
 
-func getUnaryCodec(contentType string) encoding.CodecV2 {
+// getCodecForServerUnaryResponse returns the codec to use to handle a unary request on
+// the server, based on the Content-Type headers from the incoming request.
+func getCodecForServerUnaryResponse(contentType string) encoding.CodecV2 {
 	// Ignore any errors or charsets for now, just parse the main type.
 	// TODO: should this be more picky / return an error?  Maybe charset utf8 only?
 	mediaType, _, _ := mime.ParseMediaType(contentType)
@@ -55,25 +64,79 @@ func getUnaryCodec(contentType string) encoding.CodecV2 {
 	}
 
 	if mediaType == ApplicationJson {
-		return encoding.GetCodecV2("json")
+		return encoding.GetCodecV2(jsonCodecName)
 	}
 
 	return nil
 }
 
-func getStreamingCodec(contentType string) encoding.CodecV2 {
+// getServerStreamReaderAndWriter returns the reader and writer to use to handle a streaming request on
+// the server, based on the Content-Type headers from the incoming request.
+func getServerStreamReaderAndWriter(contentType string, r io.Reader, w io.Writer, flusher flusher) (streamReader, streamWriter, string) {
 	// Ignore any errors or charsets for now, just parse the main type.
 	// TODO: should this be more picky / return an error?  Maybe charset utf8 only?
 	mediaType, _, _ := mime.ParseMediaType(contentType)
 
 	if mediaType == StreamRpcContentType_V1 {
-		return encoding.GetCodecV2(grpcproto.Name)
+		codec := encoding.GetCodecV2(grpcproto.Name)
+		return newSizePrefixedReader(r, codec), newSizePrefixedWriter(w, codec), StreamRpcContentType_V1
 	}
 
 	if mediaType == ApplicationJson {
-		// TODO: support half-duplix JSON streaming?
-		// https://en.wikipedia.org/wiki/JSON_streaming#Record_separator-delimited_JSON
-		return nil
+		codec := encoding.GetCodecV2(jsonCodecName)
+		return newJSONReader(r, codec), newSSEWriter(w, flusher, codec), EventStreamContentType
+	}
+
+	return nil, nil, ""
+}
+
+// getHeadersAndCodecForClientUnaryRequest returns the headers and codec to use to handle a unary request on
+// the client, based on the the configuration of the client (currently whether to use JSON encoding).
+func getHeadersAndCodecForClientUnaryRequest(ctx context.Context, useJSONEncoding bool) (http.Header, encoding.CodecV2) {
+	h := headersFromContext(ctx)
+	if useJSONEncoding {
+		h.Set("Content-Type", ApplicationJson)
+		return h, encoding.GetCodecV2(jsonCodecName)
+	}
+
+	h.Set("Content-Type", UnaryRpcContentType_V1)
+	return h, encoding.GetCodecV2(grpcproto.Name)
+}
+
+// getHeadersAndCodecForClientStreamingRequest returns the headers and writer to use to handle a streaming request on
+// the client, based on the the configuration of the client (currently whether to use JSON encoding).
+func getHeadersAndCodecForClientStreamingRequest(ctx context.Context, useJSONEncoding bool) (http.Header, func(w io.Writer) streamWriter) {
+	h := headersFromContext(ctx)
+	if useJSONEncoding {
+		h.Set("Content-Type", ApplicationJson)
+		h.Set("Accept", EventStreamContentType)
+		return h, func(w io.Writer) streamWriter {
+			return newJSONWriter(w, encoding.GetCodecV2(jsonCodecName))
+		}
+	}
+
+	h.Set("Content-Type", StreamRpcContentType_V1)
+	h.Set("Accept", StreamRpcContentType_V1)
+	return h, func(w io.Writer) streamWriter {
+		return newSizePrefixedWriter(w, encoding.GetCodecV2(grpcproto.Name))
+	}
+}
+
+// getClientStreamReader returns the reader to use to handle a streaming result on
+// the client, based on the Content-Type header that was returned from the server.
+func getClientStreamReader(contentType string, r io.Reader) streamReader {
+	// Ignore any errors or charsets for now, just parse the main type.
+	// TODO: should this be more picky / return an error?  Maybe charset utf8 only?
+	mediaType, _, _ := mime.ParseMediaType(contentType)
+
+	if mediaType == StreamRpcContentType_V1 {
+		codec := encoding.GetCodecV2(grpcproto.Name)
+		return newSizePrefixedReader(r, codec)
+	}
+
+	if mediaType == EventStreamContentType {
+		codec := encoding.GetCodecV2(jsonCodecName)
+		return newSSEReader(r, codec)
 	}
 
 	return nil
