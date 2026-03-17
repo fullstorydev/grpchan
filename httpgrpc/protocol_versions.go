@@ -64,7 +64,7 @@ func getCodecForServerUnaryResponse(contentType string) encoding.CodecV2 {
 	}
 
 	if mediaType == ApplicationJson {
-		return encoding.GetCodecV2("json")
+		return encoding.GetCodecV2(jsonCodecName)
 	}
 
 	return nil
@@ -83,7 +83,7 @@ func getServerStreamReaderAndWriter(contentType string, r io.Reader, w io.Writer
 	}
 
 	if mediaType == ApplicationJson {
-		codec := encoding.GetCodecV2("json")
+		codec := encoding.GetCodecV2(jsonCodecName)
 		return newJSONReader(r, codec), newSSEWriter(w, flusher, codec), EventStreamContentType
 	}
 
@@ -96,7 +96,7 @@ func getHeadersAndCodecForClientUnaryRequest(ctx context.Context, useJSONEncodin
 	h := headersFromContext(ctx)
 	if useJSONEncoding {
 		h.Set("Content-Type", ApplicationJson)
-		return h, encoding.GetCodecV2("json")
+		return h, encoding.GetCodecV2(jsonCodecName)
 	}
 
 	h.Set("Content-Type", UnaryRpcContentType_V1)
@@ -111,7 +111,7 @@ func getHeadersAndCodecForClientStreamingRequest(ctx context.Context, useJSONEnc
 		h.Set("Content-Type", ApplicationJson)
 		h.Set("Accept", EventStreamContentType)
 		return h, func(w io.Writer) streamWriter {
-			return newJSONWriter(w, encoding.GetCodecV2("json"))
+			return newJSONWriter(w, encoding.GetCodecV2(jsonCodecName))
 		}
 	}
 
@@ -135,7 +135,7 @@ func getClientStreamReader(contentType string, r io.Reader) streamReader {
 	}
 
 	if mediaType == EventStreamContentType {
-		codec := encoding.GetCodecV2("json")
+		codec := encoding.GetCodecV2(jsonCodecName)
 		return newSSEReader(r, codec)
 	}
 

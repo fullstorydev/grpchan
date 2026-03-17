@@ -9,6 +9,8 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 )
 
+const jsonCodecName = "json"
+
 var (
 	grpcJsonMarshaler = protojson.MarshalOptions{
 		UseEnumNumbers:  true,
@@ -38,5 +40,5 @@ func (c jsonCodec) Unmarshal(data mem.BufferSlice, v interface{}) error {
 }
 
 func (c jsonCodec) Name() string {
-	return "json"
+	return jsonCodecName
 }
