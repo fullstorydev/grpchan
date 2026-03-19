@@ -63,9 +63,9 @@ func ClearMessage(m interface{}) error {
 func TranslateContextError(err error) error {
 	switch err {
 	case context.DeadlineExceeded:
-		return status.Errorf(codes.DeadlineExceeded, err.Error())
+		return status.Error(codes.DeadlineExceeded, err.Error())
 	case context.Canceled:
-		return status.Errorf(codes.Canceled, err.Error())
+		return status.Error(codes.Canceled, err.Error())
 	}
 	return err
 }
