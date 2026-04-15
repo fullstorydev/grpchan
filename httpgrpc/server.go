@@ -18,8 +18,6 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/encoding"
-	grpcproto "google.golang.org/grpc/encoding/proto"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
@@ -305,9 +303,8 @@ func handleMethod(svr interface{}, serviceName string, desc *grpc.MethodDesc, un
 			}
 			statProto := st.Proto()
 			w.Header().Set("X-GRPC-Status", fmt.Sprintf("%d:%s", statProto.Code, statProto.Message))
-			protoCodec := encoding.GetCodecV2(grpcproto.Name)
 			for _, d := range statProto.Details {
-				buf, err := protoCodec.Marshal(d)
+				buf, err := codec.Marshal(d)
 				if err != nil {
 					continue
 				}

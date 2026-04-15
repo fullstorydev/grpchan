@@ -56,9 +56,13 @@
 // includes details, they are attached via one or more headers named "X-GRPC-Details". If
 // more than one error detail is associated with the status, there will be more than one
 // header, and they will be added to the response in the same order as they appear in the
-// server-side status. The value for the details header is a base64-encoding
-// google.protobuf.Any message, which contains the error detail message. If the handler
-// sends trailers, not just headers, they are encoded as HTTP 1.1 headers, but their names
+// server-side status. Each header value is a base64 (raw URL encoding) of the
+// google.protobuf.Any for that detail, using the same CodecV2 as the unary request and
+// response body (binary protobuf for "application/x-protobuf", JSON for "application/json").
+// This is independent of the HTTP error response body produced by DefaultErrorRenderer
+// (for example "text/plain"), so clients must not infer detail encoding from the response
+// Content-Type on failure. *httpgrpc.Channel uses its JSON mode to pick the matching codec
+// when decoding these headers. If the handler sends trailers, not just headers, they are encoded as HTTP 1.1 headers, but their names
 // are prefixed with "X-GRPC-Trailer-". This allows clients to recover headers and trailers
 // independently, as the server handler intended them.
 //

@@ -141,3 +141,14 @@ func getClientStreamReader(contentType string, r io.Reader) streamReader {
 
 	return nil
 }
+
+// codecForUnaryGRPCDetails returns the CodecV2 used to marshal and unmarshal
+// google.protobuf.Any values in X-GRPC-Details headers for unary RPCs. It
+// matches the unary request/response body codec (protobuf vs JSON) selected
+// from the request Content-Type or from Channel.WithJSONEncoding on the client.
+func codecForUnaryGRPCDetails(useJSONEncoding bool) encoding.CodecV2 {
+	if useJSONEncoding {
+		return encoding.GetCodecV2(jsonCodecName)
+	}
+	return encoding.GetCodecV2(grpcproto.Name)
+}

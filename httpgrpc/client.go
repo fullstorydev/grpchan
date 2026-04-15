@@ -25,10 +25,10 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/encoding"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
-	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/fullstorydev/grpchan/internal"
@@ -135,7 +135,7 @@ func (ch *Channel) Invoke(ctx context.Context, methodName string, req, resp inte
 		}
 	}
 
-	if stat := statFromResponse(reply); stat.Code() != codes.OK {
+	if stat := statFromResponse(reply, codec); stat.Code() != codes.OK {
 		return stat.Err()
 	}
 
@@ -177,7 +177,8 @@ func (ch *Channel) NewStream(ctx context.Context, desc *grpc.StreamDesc, methodN
 	}
 	req.Header = h
 
-	cs := newClientStream(ctx, cancel, w, desc.ServerStreams, copts, ch.BaseURL, newStreamWriter(w))
+	detailsCodec := codecForUnaryGRPCDetails(ch.useJSONEncoding)
+	cs := newClientStream(ctx, cancel, w, desc.ServerStreams, copts, ch.BaseURL, newStreamWriter(w), detailsCodec)
 	go cs.doHttpCall(ch.Transport, req, r)
 
 	// ensure that context is cancelled, even if caller
@@ -245,6 +246,10 @@ type clientStream struct {
 
 	streamWriter streamWriter
 
+	// detailsCodec unmarshals X-GRPC-Details when a streaming RPC fails before the body
+	// uses the negotiated unary-style encoding (same as Channel.WithJSONEncoding).
+	detailsCodec encoding.CodecV2
+
 	// respStream is set to indicate whether client expects stream response; unary if false
 	respStream bool
 
@@ -278,6 +283,7 @@ func newClientStream(
 	copts *internal.CallOptions,
 	baseUrl *url.URL,
 	streamWriter streamWriter,
+	detailsCodec encoding.CodecV2,
 ) *clientStream {
 	cs := &clientStream{
 		ctx:          ctx,
@@ -285,6 +291,7 @@ func newClientStream(
 		copts:        copts,
 		baseUrl:      baseUrl,
 		streamWriter: streamWriter,
+		detailsCodec: detailsCodec,
 		w:            w,
 		respStream:   recvStream,
 		rCh:          make(chan streamMsg),
@@ -477,7 +484,7 @@ func (cs *clientStream) doHttpCall(transport http.RoundTripper, req *http.Reques
 
 	onReady(nil, md)
 
-	stat := statFromResponse(reply)
+	stat := statFromResponse(reply, cs.detailsCodec)
 	if stat.Code() != codes.OK {
 		statProto := stat.Proto()
 		cs.tr.Code = statProto.Code
@@ -568,7 +575,7 @@ func headersFromContext(ctx context.Context) http.Header {
 	return h
 }
 
-func statFromResponse(reply *http.Response) *status.Status {
+func statFromResponse(reply *http.Response, detailsCodec encoding.CodecV2) *status.Status {
 	code := codeFromHttpStatus(reply.StatusCode)
 	msg := reply.Status
 	codeStrs := strings.SplitN(reply.Header.Get("X-GRPC-Status"), ":", 2)
@@ -589,11 +596,11 @@ func statFromResponse(reply *http.Response) *status.Status {
 				if err != nil {
 					continue
 				}
-				var msg anypb.Any
-				if err := proto.Unmarshal(b, &msg); err != nil {
+				msg := new(anypb.Any)
+				if err := detailsCodec.Unmarshal(mem.BufferSlice{mem.SliceBuffer(b)}, msg); err != nil {
 					continue
 				}
-				details = append(details, &msg)
+				details = append(details, msg)
 			}
 		}
 		if len(details) > 0 {
