@@ -1,6 +1,6 @@
 module github.com/fullstorydev/grpchan
 
-go 1.24.0
+go 1.25.0
 
 require (
 	github.com/golang/protobuf v1.5.4
@@ -14,7 +14,7 @@ require (
 
 require (
 	github.com/bufbuild/protocompile v0.9.0 // indirect
-	golang.org/x/net v0.48.0 // indirect
-	golang.org/x/sys v0.39.0 // indirect
-	golang.org/x/text v0.32.0 // indirect
+	golang.org/x/net v0.55.0 // indirect
+	golang.org/x/sys v0.45.0 // indirect
+	golang.org/x/text v0.37.0 // indirect
 )
