@@ -5,9 +5,9 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"mime"
 	"net/http"
 	"net/textproto"
@@ -26,6 +26,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/encoding"
+	grpcproto "google.golang.org/grpc/encoding/proto"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
@@ -35,47 +36,116 @@ import (
 )
 
 // ChannelOption is a function that can be used to configure a Channel.
-type ChannelOption func(*channelOptions)
+type ChannelOption func(*channelOptions) error
 
 type channelOptions struct {
 	// TODO(kellegous): It would be ideal if this were refactored into a protocol abstraction that encapsulates the message-level codec and the framing strategy
 	// into a single object. That would all us to have size-prefixed proto, json+see, connectRPC ... anything else.
-	useJSONEncoding bool
+
+	// codecName is the name the codec was looked up by. It selects the content type
+	// of a request and, with the grpc-over-http protocol defined in this package,
+	// also how streams are framed.
+	//
+	// We preserve this instead of using codec.Name() because this value is
+	// already normalized and safe to compare, case-sensitive, with just ==.
+	codecName string
+	codec     encoding.CodecV2
+}
+
+func (o *channelOptions) setCodec(name string) error {
+	codec, err := codecByName(name)
+	if err != nil {
+		return err
+	}
+	o.codecName, o.codec = name, codec
+	return nil
+}
+
+func defaultChannelOptions() (channelOptions, error) {
+	var opts channelOptions
+	// Default to protobuf binary encoding.
+	if err := opts.setCodec(grpcproto.Name); err != nil {
+		return channelOptions{}, err
+	}
+	return opts, nil
+}
+
+// codecByName looks up a registered codec, reporting an unrecognized name as
+// an error.
+func codecByName(name string) (encoding.CodecV2, error) {
+	codec := encoding.GetCodecV2(name)
+	if codec == nil {
+		return nil, fmt.Errorf("no codec registered for %q", name)
+	}
+	return codec, nil
 }
 
 // WithJSONEncoding configures the channel to use JSON encoding between the client and server.
 // For unary calls, the request and response are JSON values. For streaming calls, the request is
 // a series of JSON values and the response is SSE events containing JSON values.
 func WithJSONEncoding(useJSONEncoding bool) ChannelOption {
-	return func(o *channelOptions) {
-		o.useJSONEncoding = useJSONEncoding
+	return func(o *channelOptions) error {
+		name := grpcproto.Name
+		if useJSONEncoding {
+			name = jsonCodecName
+		}
+		// Resolved in both directions, so that a later WithJSONEncoding(false) undoes
+		// an earlier WithJSONEncoding(true) rather than leaving JSON in place.
+		return o.setCodec(name)
 	}
 }
 
-// NewChannel creates a new Channel with the given base URL and transport.
-// The ChannelOption functions can be used to configure the Channel.
-func NewChannel(baseURL *url.URL, transport http.RoundTripper, opts ...ChannelOption) *Channel {
-	c := &Channel{
+// NewChannel creates a new Channel with the given base URL and transport, both of
+// which are required. The ChannelOption functions can be used to configure the
+// Channel. The error reports a channel that cannot be configured as asked.
+func NewChannel(baseURL *url.URL, transport http.RoundTripper, opts ...ChannelOption) (*Channel, error) {
+	if err := checkChannelParams(baseURL, transport); err != nil {
+		return nil, err
+	}
+	chOpts, err := defaultChannelOptions()
+	if err != nil {
+		return nil, err
+	}
+	for _, opt := range opts {
+		if err := opt(&chOpts); err != nil {
+			return nil, err
+		}
+	}
+	return &Channel{
 		BaseURL:   baseURL,
 		Transport: transport,
-	}
-
-	for _, opt := range opts {
-		opt(&c.channelOptions)
-	}
-
-	return c
+		opts:      &chOpts,
+	}, nil
 }
 
-// Channel is used as a connection for GRPC requests issued over HTTP 1.1. The
-// server endpoint is configured using the BaseURL field, and the Transport can
-// also be configured. Both of those fields must be specified.
+func checkChannelParams(baseURL *url.URL, transport http.RoundTripper) error {
+	if baseURL == nil {
+		return errors.New("channel base URL is required")
+	}
+	if transport == nil {
+		return errors.New("channel transport is required")
+	}
+	return nil
+}
+
+// Channel is used as a connection for GRPC requests issued over HTTP 1.1.
+// Values should be created using the NewChannel constructor.
 //
-// It implements version 1 of the GRPC-over-HTTP transport protocol.
+// For backwards compatibility, it is still allowed to construct the channel
+// via a struct literal, as long as both Transport and BaseURL fields are set
+// to non-nil values. Construction via struct literal produces a Channel with
+// all default behavior; use of NewChannel is required to provide channel
+// options.
+//
+// It implements version 1 of the GRPC-over-HTTP transport protocol defined
+// in this package.
 type Channel struct {
 	Transport http.RoundTripper
 	BaseURL   *url.URL
-	channelOptions
+	// opts is nil when the channel was built as a struct literal, which is the
+	// older and still supported form, and so carries all default behavior. A
+	// non-nil value means NewChannel already validated the configuration.
+	opts *channelOptions
 }
 
 var _ grpc.ClientConnInterface = (*Channel)(nil)
@@ -85,17 +155,22 @@ var grpcDetailsHeader = textproto.CanonicalMIMEHeaderKey("X-GRPC-Details")
 // Invoke satisfies the grpchan.Channel interface and supports sending unary
 // RPCs via the in-process channel.
 func (ch *Channel) Invoke(ctx context.Context, methodName string, req, resp interface{}, opts ...grpc.CallOption) error {
+	chOpts, err := ch.channelOptions()
+	if err != nil {
+		return err
+	}
 	copts := internal.GetCallOptions(opts)
 
 	reqUrl := *ch.BaseURL
 	reqUrl.Path = path.Join(reqUrl.Path, methodName)
 	reqUrlStr := reqUrl.String()
-	ctx, err := internal.ApplyPerRPCCreds(ctx, copts, reqUrlStr, reqUrl.Scheme == "https")
+	ctx, err = internal.ApplyPerRPCCreds(ctx, copts, reqUrlStr, reqUrl.Scheme == "https")
 	if err != nil {
 		return err
 	}
 
-	h, codec := getHeadersAndCodecForClientUnaryRequest(ctx, ch.useJSONEncoding)
+	codec := chOpts.codec
+	h := getHeadersForClientUnaryRequest(ctx, chOpts)
 	buf, err := codec.Marshal(req)
 	if err != nil {
 		return err
@@ -120,8 +195,8 @@ func (ch *Channel) Invoke(ctx context.Context, methodName string, req, resp inte
 	respCh := make(chan struct{})
 	go func() {
 		defer close(respCh)
-		b, err = ioutil.ReadAll(reply.Body)
-		reply.Body.Close()
+		b, err = io.ReadAll(reply.Body)
+		_ = reply.Body.Close()
 	}()
 
 	if len(copts.Peer) > 0 {
@@ -154,31 +229,35 @@ func (ch *Channel) Invoke(ctx context.Context, methodName string, req, resp inte
 // NewStream satisfies the grpchan.Channel interface and supports sending
 // streaming RPCs via the in-process channel.
 func (ch *Channel) NewStream(ctx context.Context, desc *grpc.StreamDesc, methodName string, opts ...grpc.CallOption) (grpc.ClientStream, error) {
+	chOpts, err := ch.channelOptions()
+	if err != nil {
+		return nil, err
+	}
 	copts := internal.GetCallOptions(opts)
 
 	reqUrl := *ch.BaseURL
 	reqUrl.Path = path.Join(reqUrl.Path, methodName)
 	reqUrlStr := reqUrl.String()
-	ctx, err := internal.ApplyPerRPCCreds(ctx, copts, reqUrlStr, reqUrl.Scheme == "https")
+	ctx, err = internal.ApplyPerRPCCreds(ctx, copts, reqUrlStr, reqUrl.Scheme == "https")
 	if err != nil {
 		return nil, err
 	}
 
 	ctx, cancel := context.WithCancel(ctx)
 
-	h, newStreamWriter := getHeadersAndCodecForClientStreamingRequest(ctx, ch.useJSONEncoding)
+	h, newStreamWriter := getHeadersAndWriterForClientStreamingRequest(ctx, chOpts)
 
 	// Intercept r.Close() so we can control the error sent across to the writer thread.
 	r, w := io.Pipe()
-	req, err := http.NewRequest("POST", reqUrlStr, ioutil.NopCloser(r))
+	req, err := http.NewRequest("POST", reqUrlStr, io.NopCloser(r))
 	if err != nil {
 		cancel()
 		return nil, err
 	}
 	req.Header = h
 
-	detailsCodec := codecForUnaryGRPCDetails(ch.useJSONEncoding)
-	cs := newClientStream(ctx, cancel, w, desc.ServerStreams, copts, ch.BaseURL, newStreamWriter(w), detailsCodec)
+	// The details in X-GRPC-Details are encoded with the same codec as the body.
+	cs := newClientStream(ctx, cancel, w, desc.ServerStreams, copts, ch.BaseURL, newStreamWriter(w), chOpts.codec)
 	go cs.doHttpCall(ch.Transport, req, r)
 
 	// ensure that context is cancelled, even if caller
@@ -187,6 +266,19 @@ func (ch *Channel) NewStream(ctx context.Context, desc *grpc.StreamDesc, methodN
 	runtime.SetFinalizer(ret, func(*clientStreamWrapper) { cancel() })
 
 	return ret, nil
+}
+
+func (ch *Channel) channelOptions() (channelOptions, error) {
+	// These fields are exported and mutable, so we check them on every call.
+	err := checkChannelParams(ch.BaseURL, ch.Transport)
+	if err != nil {
+		return channelOptions{}, err
+	}
+	if ch.opts != nil {
+		// Configured and validated by NewChannel.
+		return *ch.opts, nil
+	}
+	return defaultChannelOptions()
 }
 
 type clientStreamWrapper struct {
@@ -469,8 +561,8 @@ func (cs *clientStream) doHttpCall(transport http.RoundTripper, req *http.Reques
 		return
 	}
 	defer func() {
-		ioutil.ReadAll(reply.Body)
-		reply.Body.Close()
+		_, _ = io.ReadAll(reply.Body)
+		_ = reply.Body.Close()
 	}()
 
 	if len(cs.copts.Peer) > 0 {

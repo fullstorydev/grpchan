@@ -42,13 +42,16 @@ const (
 )
 
 const (
-	// Non-standard and experimental; uses the `jsonpb.Marshaler` by default.
-	// Use `encoding.RegisterCodecV2` to override the default encoder with a custom encoder.
-	// Unary calls use JSON encoding for the request and response. Streaming calls from the
-	// client to the server use JSON encoding with mutiple values. Streaming calls from the
-	// server to the client use SSE encoding with multiple events.
-	ApplicationJson = "application/json"
+	// *Non-standard and experimental.*
+	//
+	// The implementation uses `protojson` for encoding/decoding by default. Use
+	// `encoding.RegisterCodecV2` to override the default encoder with a custom encoder.
+	// Unary calls use JSON encoding for the request and response. Streaming requests from
+	// the client use JSON encoding with multiple values concatenated together. Streaming
+	// responses from the server use SSE (server-side events) encoding with multiple events.
+	// The final status and trailer metadata is encoded as a trailing event.
 
+	ApplicationJson        = "application/json"
 	EventStreamContentType = "text/event-stream"
 )
 
@@ -90,35 +93,38 @@ func getServerStreamReaderAndWriter(contentType string, r io.Reader, w io.Writer
 	return nil, nil, ""
 }
 
-// getHeadersAndCodecForClientUnaryRequest returns the headers and codec to use to handle a unary request on
-// the client, based on the the configuration of the client (currently whether to use JSON encoding).
-func getHeadersAndCodecForClientUnaryRequest(ctx context.Context, useJSONEncoding bool) (http.Header, encoding.CodecV2) {
+// getHeadersForClientUnaryRequest returns the headers to use for a unary request on
+// the client. This protocol pairs each message format with a content type, so the
+// codec the channel was configured with is what selects it.
+func getHeadersForClientUnaryRequest(ctx context.Context, opts channelOptions) http.Header {
 	h := headersFromContext(ctx)
-	if useJSONEncoding {
+	if opts.codecName == jsonCodecName {
 		h.Set("Content-Type", ApplicationJson)
-		return h, encoding.GetCodecV2(jsonCodecName)
+	} else {
+		h.Set("Content-Type", UnaryRpcContentType_V1)
 	}
-
-	h.Set("Content-Type", UnaryRpcContentType_V1)
-	return h, encoding.GetCodecV2(grpcproto.Name)
+	return h
 }
 
-// getHeadersAndCodecForClientStreamingRequest returns the headers and writer to use to handle a streaming request on
-// the client, based on the the configuration of the client (currently whether to use JSON encoding).
-func getHeadersAndCodecForClientStreamingRequest(ctx context.Context, useJSONEncoding bool) (http.Header, func(w io.Writer) streamWriter) {
+// getHeadersAndWriterForClientStreamingRequest returns the headers and the writer to
+// use for a streaming request on the client. As with a unary request the codec
+// selects the content type, and here it selects the framing as well: a JSON
+// stream is a sequence of JSON values answered with server-sent events, where a
+// proto stream is size-prefixed in both directions.
+func getHeadersAndWriterForClientStreamingRequest(ctx context.Context, opts channelOptions) (http.Header, func(w io.Writer) streamWriter) {
 	h := headersFromContext(ctx)
-	if useJSONEncoding {
+	if opts.codecName == jsonCodecName {
 		h.Set("Content-Type", ApplicationJson)
 		h.Set("Accept", EventStreamContentType)
 		return h, func(w io.Writer) streamWriter {
-			return newJSONWriter(w, encoding.GetCodecV2(jsonCodecName))
+			return newJSONWriter(w, opts.codec)
 		}
 	}
 
 	h.Set("Content-Type", StreamRpcContentType_V1)
 	h.Set("Accept", StreamRpcContentType_V1)
 	return h, func(w io.Writer) streamWriter {
-		return newSizePrefixedWriter(w, encoding.GetCodecV2(grpcproto.Name))
+		return newSizePrefixedWriter(w, opts.codec)
 	}
 }
 
@@ -140,15 +146,4 @@ func getClientStreamReader(contentType string, r io.Reader) streamReader {
 	}
 
 	return nil
-}
-
-// codecForUnaryGRPCDetails returns the CodecV2 used to marshal and unmarshal
-// google.protobuf.Any values in X-GRPC-Details headers for unary RPCs. It
-// matches the unary request/response body codec (protobuf vs JSON) selected
-// from the request Content-Type or from Channel.WithJSONEncoding on the client.
-func codecForUnaryGRPCDetails(useJSONEncoding bool) encoding.CodecV2 {
-	if useJSONEncoding {
-		return encoding.GetCodecV2(jsonCodecName)
-	}
-	return encoding.GetCodecV2(grpcproto.Name)
 }

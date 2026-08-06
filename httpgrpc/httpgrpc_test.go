@@ -132,7 +132,10 @@ func TestJSONSSEServer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to parse base URL: %v", err)
 	}
-	cc := httpgrpc.NewChannel(u, http.DefaultTransport, httpgrpc.WithJSONEncoding(true))
+	cc, err := httpgrpc.NewChannel(u, http.DefaultTransport, httpgrpc.WithJSONEncoding(true))
+	if err != nil {
+		t.Fatalf("failed to create channel: %v", err)
+	}
 
 	grpchantesting.RunChannelTestCases(t, cc, false)
 
@@ -202,9 +205,12 @@ func TestUnaryXGrpcDetailsWireCodec(t *testing.T) {
 	})
 
 	t.Run("json", func(t *testing.T) {
-		cc := httpgrpc.NewChannel(u, http.DefaultTransport, httpgrpc.WithJSONEncoding(true))
+		cc, err := httpgrpc.NewChannel(u, http.DefaultTransport, httpgrpc.WithJSONEncoding(true))
+		if err != nil {
+			t.Fatalf("failed to create channel: %v", err)
+		}
 		cli := grpchantesting.NewTestServiceClient(cc)
-		_, err := cli.Unary(context.Background(), mkReq())
+		_, err = cli.Unary(context.Background(), mkReq())
 		assertUnaryErrorHasDetail(t, err, codes.FailedPrecondition, detailMsg)
 	})
 }
@@ -225,4 +231,68 @@ func assertUnaryErrorHasDetail(t *testing.T, err error, wantCode codes.Code, wan
 	if !proto.Equal(details[0].(proto.Message), wantDetail) {
 		t.Fatalf("status detail mismatch:\ngot  %v\nwant %v", details[0], wantDetail)
 	}
+}
+
+func TestNewChannelValidation(t *testing.T) {
+	u, err := url.Parse("http://127.0.0.1:1")
+	if err != nil {
+		t.Fatalf("failed to parse base URL: %v", err)
+	}
+
+	t.Run("base URL is required", func(t *testing.T) {
+		if _, err := httpgrpc.NewChannel(nil, http.DefaultTransport); err == nil {
+			t.Fatal("expected an error for a nil base URL")
+		}
+	})
+	t.Run("transport is required", func(t *testing.T) {
+		if _, err := httpgrpc.NewChannel(u, nil); err == nil {
+			t.Fatal("expected an error for a nil transport")
+		}
+	})
+	t.Run("both supplied", func(t *testing.T) {
+		ch, err := httpgrpc.NewChannel(u, http.DefaultTransport, httpgrpc.WithJSONEncoding(true))
+		if err != nil {
+			t.Fatalf("failed to create channel: %v", err)
+		}
+		if ch.BaseURL != u || ch.Transport == nil {
+			t.Fatal("channel was not configured with what it was given")
+		}
+	})
+}
+
+// TestChannelMissingFields covers the checks that cannot be made by NewChannel: a
+// Channel may also be built as a struct literal, and its fields are exported, so
+// they can be missing or cleared after construction. Either way the RPC should
+// report the problem, where it used to panic dereferencing a nil base URL.
+func TestChannelMissingFields(t *testing.T) {
+	u, err := url.Parse("http://127.0.0.1:1")
+	if err != nil {
+		t.Fatalf("failed to parse base URL: %v", err)
+	}
+
+	checkFails := func(t *testing.T, ch *httpgrpc.Channel) {
+		t.Helper()
+		cli := grpchantesting.NewTestServiceClient(ch)
+		if _, err := cli.Unary(context.Background(), &grpchantesting.Message{}); err == nil {
+			t.Error("expected a unary RPC to report the missing field")
+		}
+		if _, err := cli.ServerStream(context.Background(), &grpchantesting.Message{}); err == nil {
+			t.Error("expected a streaming RPC to report the missing field")
+		}
+	}
+
+	t.Run("struct literal without base URL", func(t *testing.T) {
+		checkFails(t, &httpgrpc.Channel{Transport: http.DefaultTransport})
+	})
+	t.Run("struct literal without transport", func(t *testing.T) {
+		checkFails(t, &httpgrpc.Channel{BaseURL: u})
+	})
+	t.Run("field cleared after NewChannel", func(t *testing.T) {
+		ch, err := httpgrpc.NewChannel(u, http.DefaultTransport)
+		if err != nil {
+			t.Fatalf("failed to create channel: %v", err)
+		}
+		ch.BaseURL = nil
+		checkFails(t, ch)
+	})
 }
