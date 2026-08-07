@@ -263,7 +263,7 @@ func (ch *Channel) NewStream(ctx context.Context, desc *grpc.StreamDesc, methodN
 	// ensure that context is cancelled, even if caller
 	// fails to fully consume or cancel the stream
 	ret := &clientStreamWrapper{cs}
-	runtime.SetFinalizer(ret, func(*clientStreamWrapper) { cancel() })
+	runtime.AddCleanup(ret, func(struct{}) { cancel() }, struct{}{})
 
 	return ret, nil
 }
@@ -281,8 +281,57 @@ func (ch *Channel) channelOptions() (channelOptions, error) {
 	return defaultChannelOptions()
 }
 
+// clientStreamWrapper exists so that a stream the caller abandons still has its
+// context cancelled, by a runtime cleanup, rather than leaving the RPC open
+// forever.
+//
+// Its methods are spelled out rather than promoted from an embedded interface,
+// and each one keeps the wrapper alive across the call it delegates to. Promoted
+// methods would let the wrapper become unreachable as soon as a call descended
+// into the stream underneath it, since nothing on the stack refers to the wrapper
+// any more. A garbage collection during a blocking Recv could then run the
+// cleanup and cancel an RPC that was still very much in progress, surfacing as a
+// spurious "context canceled".
 type clientStreamWrapper struct {
-	grpc.ClientStream
+	stream grpc.ClientStream
+}
+
+var _ grpc.ClientStream = (*clientStreamWrapper)(nil)
+
+func (w *clientStreamWrapper) Header() (metadata.MD, error) {
+	md, err := w.stream.Header()
+	runtime.KeepAlive(w)
+	return md, err
+}
+
+func (w *clientStreamWrapper) Trailer() metadata.MD {
+	md := w.stream.Trailer()
+	runtime.KeepAlive(w)
+	return md
+}
+
+func (w *clientStreamWrapper) CloseSend() error {
+	err := w.stream.CloseSend()
+	runtime.KeepAlive(w)
+	return err
+}
+
+func (w *clientStreamWrapper) Context() context.Context {
+	ctx := w.stream.Context()
+	runtime.KeepAlive(w)
+	return ctx
+}
+
+func (w *clientStreamWrapper) SendMsg(m interface{}) error {
+	err := w.stream.SendMsg(m)
+	runtime.KeepAlive(w)
+	return err
+}
+
+func (w *clientStreamWrapper) RecvMsg(m interface{}) error {
+	err := w.stream.RecvMsg(m)
+	runtime.KeepAlive(w)
+	return err
 }
 
 func getPeer(baseUrl *url.URL, tls *tls.ConnectionState) *peer.Peer {
@@ -544,6 +593,21 @@ func (cs *clientStream) doHttpCall(transport http.RoundTripper, req *http.Reques
 		readPipe.CloseWithError(rErr)
 		close(cs.rCh)
 	}()
+
+	// Release the round trip if the context ends while the request body is still
+	// open, which is the case whenever the caller stops using the stream without
+	// calling CloseSend. The transport sends the body by reading from the pipe and
+	// cannot interrupt that read when it is told to abort -- not even by closing
+	// the body -- so RoundTrip would block indefinitely and the deferred close
+	// above, which is what would otherwise release it, is unreachable from here.
+	// Closing the read end is the only thing that ends it.
+	//
+	// Stopping this on the way out matters: the context is not always cancelled,
+	// since a caller that holds on to a finished stream never cancels it.
+	stopOnCancel := context.AfterFunc(cs.ctx, func() {
+		_ = readPipe.CloseWithError(statusFromContextError(cs.ctx.Err()))
+	})
+	defer stopOnCancel()
 
 	onReady := func(err error, headers metadata.MD) {
 		cs.hdErr = err
