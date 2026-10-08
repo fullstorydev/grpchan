@@ -4,33 +4,29 @@
 [![Go Report Card](https://goreportcard.com/badge/github.com/fullstorydev/grpchan)](https://goreportcard.com/report/github.com/fullstorydev/grpchan)
 [![GoDoc](https://godoc.org/github.com/fullstorydev/grpchan?status.svg)](https://godoc.org/github.com/fullstorydev/grpchan)
 
-This repo provides an abstraction for an RPC connection: the `Channel`.
-Implementations of `Channel` can provide alternate transports -- different
-from the standard HTTP/2-based transport provided by the `google.golang.org/grpc`
-package.
+This repo provides alternate "channel" implementations for gRPC, that provide
+the same interface and semantics (and re-use gRPC generated code) but over a
+transport other than the standard HTTP/2-based one provided by the
+`google.golang.org/grpc` package.
 
-This can be useful for providing new transports, such as HTTP 1.1, web sockets,
-or (significantly) in-process channels for testing.
+The ability to use alternate transports, such as HTTP 1.1 or in-process channels,
+is often quite useful, for testing but also for providing RPC semantics on top of
+different communication primitives. Implementations could even be built that use
+things like web sockets or streaming frameworks (like publish/subscribe systems
+or message brokers).
 
-This repo also contains two such alternate transports: an HTTP 1.1 implementation
-of gRPC (which supports all stream kinds other than full-duplex bidi streams) and
-an in-process transport (which allows a process to dispatch handlers implemented
-in the same program without needing serialize and de-serialize messages over the
-loopback network interface).
+This repo contains two alternate transports: an HTTP 1.1 implementation (which
+supports all stream kinds other than full-duplex bidi streams) and an in-process
+transport (which allows a process to dispatch handlers implemented in the same
+program without needing to serialize and de-serialize messages over the loopback
+network interface).
 
-In order to use channels with your proto-defined gRPC services, you need to use a
-protoc plugin included in this repo: `protoc-gen-grpchan`.
-
-```bash
-go install github.com/fullstorydev/grpchan/cmd/protoc-gen-grpchan
-```
-
-You use the plugin via a `--grpchan_out` parameter to protoc. Specify the same
-output directory to this parameter as you supply to `--go_out`. The plugin will
-then generate `*.pb.grpchan.go` files, alongside the `*.pb.go` files. These
-additional files contain additional methods that let you use the proto-defined
-service methods with alternate transports.
-
-```go
-//go:generate protoc --go_out=plugins=grpc:. --grpchan_out=. my.proto
-```
+The root `grpchan` package provides `grpchan.Channel` and `grpchan.ServiceRegistry`,
+which are the core interfaces to implement when building a new transport.
+Prior to grpc-go v1.32.0, it was necessary to use a
+[proto plugin](https://github.com/fullstorydev/grpchan/blob/master/cmd/protoc-gen-grpchan/protoc-gen-grpchan.go)
+that would generate additional hooks in generated gRPC code, allowing use of these
+abstractions. But as of v1.32.0, there are now `grpc.ClientConnInterface` and
+`grpc.ServiceRegistrar` interfaces that are identical to `grpchan`'s abstractions.
+As long as you are using `protoc-gen-go-grpc` v1.0.1 or higher for code generation,
+gRPC generated code works out-of-the-box with `grpchan`.
