@@ -21,12 +21,19 @@ transport (which allows a process to dispatch handlers implemented in the same
 program without needing to serialize and de-serialize messages over the loopback
 network interface).
 
-The root `grpchan` package provides `grpchan.Channel` and `grpchan.ServiceRegistry`,
-which are the core interfaces to implement when building a new transport.
-Prior to grpc-go v1.32.0, it was necessary to use a
+The root `grpchan` package was created to provide its `Channel` and `ServiceRegistry`
+interfaces; these were the core interfaces to implement when building a new transport.
+The package also includes some helpers related to these interfaces as well as a simple
+map-backed registry.
+
+These two interfaces were needed prior to grpc-go v1.32.0, as was the use of a
 [proto plugin](https://github.com/fullstorydev/grpchan/blob/master/cmd/protoc-gen-grpchan/protoc-gen-grpchan.go)
-that would generate additional hooks in generated gRPC code, allowing use of these
-abstractions. But as of v1.32.0, there are now `grpc.ClientConnInterface` and
-`grpc.ServiceRegistrar` interfaces that are identical to `grpchan`'s abstractions.
-As long as you are using `protoc-gen-go-grpc` v1.0.1 or higher for code generation,
-gRPC generated code works out-of-the-box with `grpchan`.
+that would generate additional functions alongside generated gRPC code, allowing
+the use of these abstractions. But as of v1.32.0 of the grpc-go module, there now
+exist `grpc.ClientConnInterface` and `grpc.ServiceRegistrar`, which are what a new
+transport must implement (`grpchan`'s interfaces are now deprecated aliases of these
+two). As long as you are using `protoc-gen-go-grpc` v1.0.1 or newer for code
+generation, gRPC generated code works out-of-the-box with `grpchan`. (Note that the
+old `protoc-gen-go` plugin, provided by the `github.com/golang/protobuf` repo, could
+also generate gRPC code, but its output does not work with `grpchan` without the
+proto plugin mentioned above.)

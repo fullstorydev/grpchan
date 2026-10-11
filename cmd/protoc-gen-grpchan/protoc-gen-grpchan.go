@@ -1,7 +1,22 @@
-// Command protoc-gen-grpchan is a protoc plugin that generates gRPC client stubs
-// in Go that use github.com/fullstorydev/grpchan.Channel as their transport
-// abstraction, instead of using *grpc.ClientConn. This can be used to carry RPC
-// requests and streams over other transports, such as HTTP 1.1 or in-process.
+// Command protoc-gen-grpchan is a protoc plugin that generates gRPC handler
+// registration functions in Go that use grpchan.ServiceRegistry as the target
+// instead of the *grpc.Server target that older gRPC generated code uses.
+//
+// This plugin is not needed if you are using protoc-gen-go-grpc v1.0.1 or
+// newer and grpc-go v1.32.0 or newer.
+//
+// This plugin generates code that refers to a service description that is
+// emitted by standard gRPC code generation. That package var was renamed to
+// be exported in protoc-gen-go-grpc v1.1.0. So if you are using a plugin
+// older than that (or using the older protoc-gen-go plugin, from the
+// github.com/golang/protobuf repo), you must supply an option,
+// "legacy_desc_names", to the plugin.
+//
+// This plugin can also generate client stub functions that use grpchan.Channel
+// as the transport type, instead of *grpc.ClientConn. This is enabled by
+// passing a "legacy_stubs" option to the plugin. This is needed to use the
+// grpchan module if you are using the older protoc-gen-go plugin (from the
+// github.com/golang/protobuf repo) and using a version older than v1.3.3.
 package main
 
 import (
