@@ -3,7 +3,7 @@ export PROTOC_VERSION := 22.0
 export GOWORK=off
 
 .PHONY: ci
-ci: deps lint test
+ci: deps checkgenerate lint test
 
 .PHONY: deps
 deps:
@@ -25,6 +25,14 @@ generate: .tmp/protoc/bin/protoc
 	@go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.26
 	@go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.1.0
 	go generate ./...
+
+.PHONY: checkgenerate
+checkgenerate: generate
+	git status --porcelain -- '**/*.go'
+	@if [ -n "$$(git status --porcelain -- '**/*.go')" ]; then \
+		git diff -- '**/*.go'; \
+		exit 1; \
+	fi
 
 .PHONY: lint
 lint:
