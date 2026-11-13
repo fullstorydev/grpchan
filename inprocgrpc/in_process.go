@@ -915,7 +915,7 @@ func isNil(m interface{}) bool {
 		return true
 	}
 	rv := reflect.ValueOf(m)
-	return rv.Kind() == reflect.Ptr && rv.IsNil()
+	return rv.Kind() == reflect.Pointer && rv.IsNil()
 }
 
 // statsHandlerHelper encapsulates logic for invoking stats handler methods
