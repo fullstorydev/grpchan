@@ -1,5 +1,6 @@
 export PATH := $(shell pwd)/.tmp/protoc/bin:$(PATH)
 export PROTOC_VERSION := 22.0
+export GOWORK=off
 
 .PHONY: ci
 ci: deps lint test
