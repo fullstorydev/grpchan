@@ -522,9 +522,10 @@ func (cs *clientStream) SendMsg(m interface{}) error {
 
 // endStream records why the RPC ended and tears down the request.
 //
-// The error is recorded first so that it is what a subsequent RecvMsg reports.
-// Cancelling alone would leave the reader to fill in a cancellation instead,
-// which explains far less.
+// The error is recorded first so that it is what RecvMsg reports, including a
+// RecvMsg that is already waiting and is woken by the cancellation. Cancelling
+// alone would leave the reader to fill in a cancellation instead, which
+// explains far less.
 func (cs *clientStream) endStream(err error) {
 	cs.rMu.Lock()
 	if cs.rErr == nil {
@@ -542,7 +543,7 @@ func (cs *clientStream) RecvMsg(m interface{}) error {
 
 	select {
 	case <-cs.ctx.Done():
-		return statusFromContextError(cs.ctx.Err())
+		return cs.contextDoneError()
 	case msg, ok := <-cs.rCh:
 		if !ok {
 			done, err := cs.readErrorIfDone()
@@ -564,7 +565,7 @@ func (cs *clientStream) RecvMsg(m interface{}) error {
 			// it's available for a subsequent call to Trailer)
 			select {
 			case <-cs.ctx.Done():
-				return statusFromContextError(cs.ctx.Err())
+				return cs.contextDoneError()
 			case _, ok := <-cs.rCh:
 				if ok {
 					// server tried to send >1 message!
@@ -593,6 +594,17 @@ func (cs *clientStream) RecvMsg(m interface{}) error {
 		}
 		return nil
 	}
+}
+
+// contextDoneError returns the error for a RecvMsg that stopped waiting because
+// the stream's context ended. If the stream was ended on purpose, as by
+// endStream, the reason was recorded before the context was cancelled, and it
+// explains more than the cancellation does.
+func (cs *clientStream) contextDoneError() error {
+	if done, err := cs.readErrorIfDone(); done && err != io.EOF {
+		return err
+	}
+	return statusFromContextError(cs.ctx.Err())
 }
 
 // doHttpCall performs the HTTP round trip and then reads the reply body,
