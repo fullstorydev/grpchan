@@ -584,8 +584,8 @@ func contextFromHeaders(parent context.Context, h http.Header) (context.Context,
 }
 
 // timeoutFromHeaders returns the timeout named by the GRPC-Timeout header, if
-// there is a valid one. The format is gRPC's: see the "Timeout" component of a
-// request at https://grpc.io/docs/guides/wire.html#requests.
+// the header is present and valid. The format is gRPC's: see the "Timeout"
+// component of a request at https://grpc.io/docs/guides/wire.html#requests.
 func timeoutFromHeaders(h http.Header) (time.Duration, bool) {
 	timeout := h.Get("GRPC-Timeout")
 	if timeout == "" {
@@ -593,9 +593,9 @@ func timeoutFromHeaders(h http.Header) (time.Duration, bool) {
 	}
 	suffix := timeout[len(timeout)-1]
 	timeoutVal, err := strconv.ParseInt(timeout[:len(timeout)-1], 10, 64)
-	// The format only allows a positive value. A negative one would otherwise
-	// make a deadline that has already passed, failing the call before it starts.
-	if err != nil || timeoutVal < 0 {
+	// The format allows only a positive value: anything else makes a deadline
+	// that has already passed, failing the call before it starts.
+	if err != nil || timeoutVal <= 0 {
 		return 0, false
 	}
 	var unit time.Duration
@@ -616,8 +616,7 @@ func timeoutFromHeaders(h http.Header) (time.Duration, bool) {
 		return 0, false
 	}
 	if timeoutVal > math.MaxInt64/int64(unit) {
-		// Too long to represent, and so effectively no timeout at all. Multiplying
-		// would wrap around, often to a negative duration that fails the call.
+		// Multiplication below would overflow; effectively no timeout.
 		return 0, false
 	}
 	return time.Duration(timeoutVal) * unit, true

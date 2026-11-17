@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/fullstorydev/grpchan/grpchantesting"
@@ -16,73 +17,73 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// TestTimeoutHeader covers GRPC-Timeout values that a server must not turn into
-// a deadline that has already passed: negative ones, which the format doesn't
-// allow, and ones too large to represent as a time.Duration.
+// TestTimeoutHeader covers handling of GRPC-Timeout values.
 func TestTimeoutHeader(t *testing.T) {
 	type observed struct {
+		called      bool
 		hasDeadline bool
 		remaining   time.Duration
-		err         error
 	}
-	seen := make(chan observed, 1)
+	var got observed
 	interceptor := func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
 		deadline, ok := ctx.Deadline()
-		seen <- observed{hasDeadline: ok, remaining: time.Until(deadline), err: ctx.Err()}
+		got = observed{called: true, hasDeadline: ok, remaining: time.Until(deadline)}
 		return handler(ctx, req)
 	}
 	svr := httpgrpc.NewServer(httpgrpc.WithServerUnaryInterceptor(interceptor))
 	grpchantesting.RegisterTestServiceServer(svr, &grpchantesting.TestServer{})
-	httpServer := httptest.NewServer(svr)
-	defer httpServer.Close()
 
 	body, err := proto.Marshal(&grpchantesting.Message{})
 	if err != nil {
 		t.Fatalf("failed to marshal request: %v", err)
 	}
 	testCases := []struct {
-		name         string
-		timeout      string
-		wantDeadline bool
+		name     string
+		timeout  string
+		duration time.Duration
 	}{
-		{name: "valid", timeout: "30S", wantDeadline: true},
-		{name: "negative", timeout: "-5S"},
-		{name: "overflow", timeout: "9223372036854775807H"},
-		{name: "unknown unit", timeout: "5X"},
+		{name: "valid", timeout: "30S", duration: 30 * time.Second},
+		// These are invalid so should not result in a deadline.
+		{name: "zero", timeout: "0S", duration: -1},
+		{name: "negative", timeout: "-5S", duration: -1},
+		{name: "overflow", timeout: "9223372036854775807H", duration: -1},
+		{name: "unknown unit", timeout: "5X", duration: -1},
 	}
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
-			req, err := http.NewRequest(http.MethodPost, httpServer.URL+"/grpchantesting.TestService/Unary", bytes.NewReader(body))
-			if err != nil {
-				t.Fatalf("failed to create request: %v", err)
-			}
-			req.Header.Set("Content-Type", httpgrpc.UnaryRpcContentType_V1)
-			req.Header.Set("GRPC-Timeout", testCase.timeout)
-			resp, err := httpServer.Client().Do(req)
-			if err != nil {
-				t.Fatalf("request failed: %v", err)
-			}
-			_ = resp.Body.Close()
+			// In a synctest bubble, the handler will see the deadline exactly
+			// as set (no virtual time passes between the context deadline
+			// being set and the interceptor above observing it). Calling
+			// ServeHTTP directly, rather than over a real connection, keeps
+			// the whole call in the synctest bubble.
+			synctest.Test(t, func(t *testing.T) {
+				// Reset so we don't inadvertently observe prior case's capture:
+				got.called = false
+				req := httptest.NewRequest(http.MethodPost, "/grpchantesting.TestService/Unary", bytes.NewReader(body))
+				req.Header.Set("Content-Type", httpgrpc.UnaryRpcContentType_V1)
+				req.Header.Set("GRPC-Timeout", testCase.timeout)
+				rec := httptest.NewRecorder()
+				svr.ServeHTTP(rec, req)
 
-			got := <-seen
-			if got.err != nil {
-				t.Fatalf("handler's context had already ended: %v", got.err)
-			}
-			if got.hasDeadline != testCase.wantDeadline {
-				t.Fatalf("handler's context has deadline: got %v, want %v", got.hasDeadline, testCase.wantDeadline)
-			}
-			if got.hasDeadline && (got.remaining <= 0 || got.remaining > 30*time.Second) {
-				t.Fatalf("handler's deadline is %v away, want within 30s", got.remaining)
-			}
+				if !got.called {
+					t.Fatalf("handler was not called: HTTP status %d", rec.Code)
+				}
+				switch wantDeadline := testCase.duration >= 0; {
+				case wantDeadline && !got.hasDeadline:
+					t.Fatalf("handler's context has no deadline: want %v", testCase.duration)
+				case got.hasDeadline && !wantDeadline:
+					t.Fatalf("handler's context has unexpected deadline: got %v", got.remaining)
+				case wantDeadline && got.remaining != testCase.duration:
+					t.Fatalf("handler's deadline is %v away, want %v", got.remaining, testCase.duration)
+				}
+			})
 		})
 	}
 }
 
 // TestMetadataCannotSetProtocolHeaders checks that metadata can't masquerade as
 // the headers that HTTP or httpgrpc itself uses, in either direction. Sent as is,
-// these would change how the peer reads the call: a timeout the caller never
-// set, an error status on a call that succeeded, a body the transport tries to
-// decompress, or a header that turns up as a trailer.
+// these could change/corrupt how the peer reads the call.
 func TestMetadataCannotSetProtocolHeaders(t *testing.T) {
 	svr := httpgrpc.NewServer()
 	grpchantesting.RegisterTestServiceServer(svr, &grpchantesting.TestServer{})
