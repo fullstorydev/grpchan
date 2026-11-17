@@ -272,7 +272,7 @@ func handleMethod(svr interface{}, serviceName string, desc *grpc.MethodDesc, un
 
 		ctx, cancel, err := contextFromHeaders(ctx, r.Header)
 		if err != nil {
-			writeError(w, http.StatusBadRequest)
+			writeError(w, httpStatusFromCode(status.Code(err)))
 			return
 		}
 		defer cancel()
@@ -368,7 +368,7 @@ func handleStream(svr interface{}, serviceName string, desc *grpc.StreamDesc, st
 
 		ctx, cancel, err := contextFromHeaders(ctx, r.Header)
 		if err != nil {
-			writeError(w, http.StatusBadRequest)
+			writeError(w, httpStatusFromCode(status.Code(err)))
 			return
 		}
 		defer cancel()
@@ -568,16 +568,29 @@ func (s *serverStream) RecvMsg(m interface{}) error {
 // using the given headers. The headers are converted to incoming metadata that
 // can be retrieved via metadata.FromIncomingContext. If the headers contain a
 // GRPC timeout, that is used to create a timeout for the returned context.
+//
+// The returned error is a status error, saying how the call should fail.
 func contextFromHeaders(parent context.Context, h http.Header) (context.Context, context.CancelFunc, error) {
 	cancel := func() {} // default to no-op
 	md, err := asMetadata(h)
 	if err != nil {
-		return parent, cancel, err
+		return parent, cancel, status.Errorf(codes.InvalidArgument, "malformed metadata: %v", err)
 	}
 	ctx := metadata.NewIncomingContext(parent, md)
 
 	// deadline propagation
-	if timeout, ok := timeoutFromHeaders(h); ok {
+	timeout, ok, err := timeoutFromHeaders(h)
+	if err != nil {
+		return parent, cancel, err
+	}
+	if ok {
+		if timeout == 0 {
+			// The caller has no time left, so fail the call rather than run a
+			// handler whose result no one is waiting for. This is what gRPC
+			// implementations do with a zero timeout, though the format
+			// doesn't allow one.
+			return parent, cancel, status.Error(codes.DeadlineExceeded, "timeout has already expired")
+		}
 		ctx, cancel = context.WithTimeout(ctx, timeout)
 	}
 	return ctx, cancel, nil
@@ -586,20 +599,18 @@ func contextFromHeaders(parent context.Context, h http.Header) (context.Context,
 // timeoutFromHeaders returns the timeout named by the GRPC-Timeout header, if
 // the header is present and valid. The format is gRPC's: see the "Timeout"
 // component of a request at https://grpc.io/docs/guides/wire.html#requests.
-func timeoutFromHeaders(h http.Header) (time.Duration, bool) {
+//
+// A malformed value is an error, an InvalidArgument status.
+func timeoutFromHeaders(h http.Header) (time.Duration, bool, error) {
 	timeout := h.Get("GRPC-Timeout")
 	if timeout == "" {
-		return 0, false
+		return 0, false, nil
 	}
-	suffix := timeout[len(timeout)-1]
-	timeoutVal, err := strconv.ParseInt(timeout[:len(timeout)-1], 10, 64)
-	// The format allows only a positive value: anything else makes a deadline
-	// that has already passed, failing the call before it starts.
-	if err != nil || timeoutVal <= 0 {
-		return 0, false
+	malformed := func() error {
+		return status.Errorf(codes.InvalidArgument, "malformed GRPC-Timeout header: %q", timeout)
 	}
 	var unit time.Duration
-	switch suffix {
+	switch timeout[len(timeout)-1] {
 	case 'H':
 		unit = time.Hour
 	case 'M':
@@ -613,11 +624,18 @@ func timeoutFromHeaders(h http.Header) (time.Duration, bool) {
 	case 'n':
 		unit = time.Nanosecond
 	default:
-		return 0, false
+		return 0, false, malformed()
+	}
+	// The format allows at most 8 digits, but more are accepted: older versions
+	// of the client always sent milliseconds, which takes 9 or more digits for
+	// a timeout over about 28 hours.
+	timeoutVal, err := strconv.ParseInt(timeout[:len(timeout)-1], 10, 64)
+	if err != nil || timeoutVal < 0 {
+		return 0, false, malformed()
 	}
 	if timeoutVal > math.MaxInt64/int64(unit) {
 		// Multiplication below would overflow; effectively no timeout.
-		return 0, false
+		return 0, false, nil
 	}
-	return time.Duration(timeoutVal) * unit, true
+	return time.Duration(timeoutVal) * unit, true, nil
 }

@@ -41,13 +41,22 @@ func TestTimeoutHeader(t *testing.T) {
 		name     string
 		timeout  string
 		duration time.Duration
+		// If non-zero, the call fails with this HTTP status, which the client
+		// reads as a gRPC code, without calling the handler.
+		failStatus int
 	}{
 		{name: "valid", timeout: "30S", duration: 30 * time.Second},
-		// These are invalid so should not result in a deadline.
-		{name: "zero", timeout: "0S", duration: -1},
-		{name: "negative", timeout: "-5S", duration: -1},
-		{name: "overflow", timeout: "9223372036854775807H", duration: -1},
-		{name: "unknown unit", timeout: "5X", duration: -1},
+		// More digits than the format allows, as older clients sent.
+		{name: "many digits", timeout: "123456789m", duration: 123456789 * time.Millisecond},
+		// DeadlineExceeded
+		{name: "zero", timeout: "0S", failStatus: http.StatusGatewayTimeout},
+		// InvalidArgument
+		{name: "negative", timeout: "-5S", failStatus: http.StatusBadRequest},
+		{name: "unknown unit", timeout: "5X", failStatus: http.StatusBadRequest},
+		{name: "no digits", timeout: "S", failStatus: http.StatusBadRequest},
+		{name: "not a number", timeout: "abcS", failStatus: http.StatusBadRequest},
+		// Too long to represent, so this should not result in a deadline.
+		{name: "overflow", timeout: "99999999H", duration: -1},
 	}
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -65,6 +74,15 @@ func TestTimeoutHeader(t *testing.T) {
 				rec := httptest.NewRecorder()
 				svr.ServeHTTP(rec, req)
 
+				if testCase.failStatus != 0 {
+					if got.called {
+						t.Fatal("handler was called, want the call to fail first")
+					}
+					if rec.Code != testCase.failStatus {
+						t.Fatalf("HTTP status: got %d, want %d", rec.Code, testCase.failStatus)
+					}
+					return
+				}
 				if !got.called {
 					t.Fatalf("handler was not called: HTTP status %d", rec.Code)
 				}

@@ -170,7 +170,10 @@ func (ch *Channel) Invoke(ctx context.Context, methodName string, req, resp inte
 	}
 
 	codec := chOpts.codec
-	h := getHeadersForClientUnaryRequest(ctx, chOpts)
+	h, err := getHeadersForClientUnaryRequest(ctx, chOpts)
+	if err != nil {
+		return err
+	}
 	buf, err := codec.Marshal(req)
 	if err != nil {
 		return err
@@ -245,7 +248,11 @@ func (ch *Channel) NewStream(ctx context.Context, desc *grpc.StreamDesc, methodN
 
 	ctx, cancel := context.WithCancel(ctx)
 
-	h, newStreamWriter := getHeadersAndWriterForClientStreamingRequest(ctx, chOpts)
+	h, newStreamWriter, err := getHeadersAndWriterForClientStreamingRequest(ctx, chOpts)
+	if err != nil {
+		cancel()
+		return nil, err
+	}
 
 	// Intercept r.Close() so we can control the error sent across to the writer thread.
 	r, w := io.Pipe()
@@ -751,20 +758,48 @@ func statusFromContextError(err error) error {
 // based on the specified context. GRPC clients store outgoing metadata into the
 // context, which is translated into headers. Also, a context deadline will be
 // propagated to the server via GRPC timeout metadata.
-func headersFromContext(ctx context.Context) http.Header {
+//
+// It returns a DeadlineExceeded error if the deadline has already passed, since
+// a request sent now could only fail. The context may not report that it has
+// ended yet: that happens only once its timer fires, which can be a little
+// after the deadline.
+func headersFromContext(ctx context.Context) (http.Header, error) {
 	h := http.Header{}
 	if md, ok := metadata.FromOutgoingContext(ctx); ok {
 		toHeaders(md, h, "")
 	}
 	if deadline, ok := ctx.Deadline(); ok {
 		timeout := time.Until(deadline)
-		millis := int64(timeout / time.Millisecond)
-		if millis <= 0 {
-			millis = 1
+		if timeout <= 0 {
+			return nil, status.Error(codes.DeadlineExceeded, context.DeadlineExceeded.Error())
 		}
-		h.Set("GRPC-Timeout", fmt.Sprintf("%dm", millis))
+		h.Set("GRPC-Timeout", encodeTimeout(timeout))
 	}
-	return h
+	return h, nil
+}
+
+// encodeTimeout formats the given timeout as the value of a GRPC-Timeout
+// header. The format allows at most 8 digits, so this uses the finest unit in
+// which the value fits, truncating anything finer. The timeout must be positive.
+func encodeTimeout(timeout time.Duration) string {
+	const maxValue = 1e8 // exclusive
+	units := []struct {
+		size   time.Duration
+		suffix string
+	}{
+		{time.Nanosecond, "n"},
+		{time.Microsecond, "u"},
+		{time.Millisecond, "m"},
+		{time.Second, "S"},
+		{time.Minute, "M"},
+	}
+	for _, unit := range units {
+		if timeout < unit.size*maxValue {
+			return strconv.FormatInt(int64(timeout/unit.size), 10) + unit.suffix
+		}
+	}
+	// A time.Duration is always less than 1e8 hours.
+	return strconv.FormatInt(int64(timeout/time.Hour), 10) + "H"
 }
 
 func statFromResponse(reply *http.Response, detailsCodec encoding.CodecV2) *status.Status {
