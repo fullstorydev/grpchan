@@ -96,14 +96,17 @@ func getServerStreamReaderAndWriter(contentType string, r io.Reader, w io.Writer
 // getHeadersForClientUnaryRequest returns the headers to use for a unary request on
 // the client. This protocol pairs each message format with a content type, so the
 // codec the channel was configured with is what selects it.
-func getHeadersForClientUnaryRequest(ctx context.Context, opts channelOptions) http.Header {
-	h := headersFromContext(ctx)
+func getHeadersForClientUnaryRequest(ctx context.Context, opts channelOptions) (http.Header, error) {
+	h, err := headersFromContext(ctx)
+	if err != nil {
+		return nil, err
+	}
 	if opts.codecName == jsonCodecName {
 		h.Set("Content-Type", ApplicationJson)
 	} else {
 		h.Set("Content-Type", UnaryRpcContentType_V1)
 	}
-	return h
+	return h, nil
 }
 
 // getHeadersAndWriterForClientStreamingRequest returns the headers and the writer to
@@ -111,21 +114,24 @@ func getHeadersForClientUnaryRequest(ctx context.Context, opts channelOptions) h
 // selects the content type, and here it selects the framing as well: a JSON
 // stream is a sequence of JSON values answered with server-sent events, where a
 // proto stream is size-prefixed in both directions.
-func getHeadersAndWriterForClientStreamingRequest(ctx context.Context, opts channelOptions) (http.Header, func(w io.Writer) streamWriter) {
-	h := headersFromContext(ctx)
+func getHeadersAndWriterForClientStreamingRequest(ctx context.Context, opts channelOptions) (http.Header, func(w io.Writer) streamWriter, error) {
+	h, err := headersFromContext(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
 	if opts.codecName == jsonCodecName {
 		h.Set("Content-Type", ApplicationJson)
 		h.Set("Accept", EventStreamContentType)
 		return h, func(w io.Writer) streamWriter {
 			return newJSONWriter(w, opts.codec)
-		}
+		}, nil
 	}
 
 	h.Set("Content-Type", StreamRpcContentType_V1)
 	h.Set("Accept", StreamRpcContentType_V1)
 	return h, func(w io.Writer) streamWriter {
 		return newSizePrefixedWriter(w, opts.codec)
-	}
+	}, nil
 }
 
 // getClientStreamReader returns the reader to use to handle a streaming result on

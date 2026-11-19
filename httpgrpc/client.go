@@ -170,7 +170,10 @@ func (ch *Channel) Invoke(ctx context.Context, methodName string, req, resp inte
 	}
 
 	codec := chOpts.codec
-	h := getHeadersForClientUnaryRequest(ctx, chOpts)
+	h, err := getHeadersForClientUnaryRequest(ctx, chOpts)
+	if err != nil {
+		return err
+	}
 	buf, err := codec.Marshal(req)
 	if err != nil {
 		return err
@@ -200,7 +203,7 @@ func (ch *Channel) Invoke(ctx context.Context, methodName string, req, resp inte
 	}()
 
 	if len(copts.Peer) > 0 {
-		copts.SetPeer(getPeer(ch.BaseURL, r.TLS))
+		copts.SetPeer(getPeer(ch.BaseURL, reply.TLS))
 	}
 
 	// gather headers and trailers
@@ -245,7 +248,11 @@ func (ch *Channel) NewStream(ctx context.Context, desc *grpc.StreamDesc, methodN
 
 	ctx, cancel := context.WithCancel(ctx)
 
-	h, newStreamWriter := getHeadersAndWriterForClientStreamingRequest(ctx, chOpts)
+	h, newStreamWriter, err := getHeadersAndWriterForClientStreamingRequest(ctx, chOpts)
+	if err != nil {
+		cancel()
+		return nil, err
+	}
 
 	// Intercept r.Close() so we can control the error sent across to the writer thread.
 	r, w := io.Pipe()
@@ -508,7 +515,32 @@ func (cs *clientStream) SendMsg(m interface{}) error {
 	}
 
 	cs.wErr = cs.streamWriter(m, false)
+	var marshalErr marshalError
+	if errors.As(cs.wErr, &marshalErr) {
+		// Like gRPC-Go, a message that can't be encoded ends the RPC, since nothing
+		// else will: the server is left waiting for the message. Failures to write
+		// are left alone, since they mean the RPC is already ending, and RecvMsg is
+		// where its real result is reported.
+		cs.wErr = status.Errorf(codes.Internal, "could not marshal message: %v", marshalErr.err)
+		cs.endStream(cs.wErr)
+	}
 	return cs.wErr
+}
+
+// endStream records why the RPC ended and tears down the request.
+//
+// The error is recorded first so that it is what RecvMsg reports, including a
+// RecvMsg that is already waiting and is woken by the cancellation. Cancelling
+// alone would leave the reader to fill in a cancellation instead, which
+// explains far less.
+func (cs *clientStream) endStream(err error) {
+	defer cs.cancel()
+	cs.rMu.Lock()
+	defer cs.rMu.Unlock()
+	if cs.rErr == nil {
+		cs.rErr = err
+	}
+	cs.done = true
 }
 
 func (cs *clientStream) RecvMsg(m interface{}) error {
@@ -518,7 +550,7 @@ func (cs *clientStream) RecvMsg(m interface{}) error {
 
 	select {
 	case <-cs.ctx.Done():
-		return statusFromContextError(cs.ctx.Err())
+		return cs.contextDoneError()
 	case msg, ok := <-cs.rCh:
 		if !ok {
 			done, err := cs.readErrorIfDone()
@@ -540,7 +572,7 @@ func (cs *clientStream) RecvMsg(m interface{}) error {
 			// it's available for a subsequent call to Trailer)
 			select {
 			case <-cs.ctx.Done():
-				return statusFromContextError(cs.ctx.Err())
+				return cs.contextDoneError()
 			case _, ok := <-cs.rCh:
 				if ok {
 					// server tried to send >1 message!
@@ -569,6 +601,17 @@ func (cs *clientStream) RecvMsg(m interface{}) error {
 		}
 		return nil
 	}
+}
+
+// contextDoneError returns the error for a RecvMsg that stopped waiting because
+// the stream's context ended. If the stream was ended on purpose, as by
+// endStream, the reason was recorded before the context was cancelled, and it
+// explains more than the cancellation does.
+func (cs *clientStream) contextDoneError() error {
+	if done, err := cs.readErrorIfDone(); done && err != io.EOF {
+		return err
+	}
+	return statusFromContextError(cs.ctx.Err())
 }
 
 // doHttpCall performs the HTTP round trip and then reads the reply body,
@@ -715,20 +758,48 @@ func statusFromContextError(err error) error {
 // based on the specified context. GRPC clients store outgoing metadata into the
 // context, which is translated into headers. Also, a context deadline will be
 // propagated to the server via GRPC timeout metadata.
-func headersFromContext(ctx context.Context) http.Header {
+//
+// It returns a DeadlineExceeded error if the deadline has already passed, since
+// a request sent now could only fail. The context may not report that it has
+// ended yet: that happens only once its timer fires, which can be a little
+// after the deadline.
+func headersFromContext(ctx context.Context) (http.Header, error) {
 	h := http.Header{}
 	if md, ok := metadata.FromOutgoingContext(ctx); ok {
 		toHeaders(md, h, "")
 	}
 	if deadline, ok := ctx.Deadline(); ok {
 		timeout := time.Until(deadline)
-		millis := int64(timeout / time.Millisecond)
-		if millis <= 0 {
-			millis = 1
+		if timeout <= 0 {
+			return nil, status.Error(codes.DeadlineExceeded, context.DeadlineExceeded.Error())
 		}
-		h.Set("GRPC-Timeout", fmt.Sprintf("%dm", millis))
+		h.Set("GRPC-Timeout", encodeTimeout(timeout))
 	}
-	return h
+	return h, nil
+}
+
+// encodeTimeout formats the given timeout as the value of a GRPC-Timeout
+// header. The format allows at most 8 digits, so this uses the finest unit in
+// which the value fits, truncating anything finer. The timeout must be positive.
+func encodeTimeout(timeout time.Duration) string {
+	const maxValue = 1e8 // exclusive
+	units := []struct {
+		size   time.Duration
+		suffix string
+	}{
+		{time.Nanosecond, "n"},
+		{time.Microsecond, "u"},
+		{time.Millisecond, "m"},
+		{time.Second, "S"},
+		{time.Minute, "M"},
+	}
+	for _, unit := range units {
+		if timeout < unit.size*maxValue {
+			return strconv.FormatInt(int64(timeout/unit.size), 10) + unit.suffix
+		}
+	}
+	// A time.Duration is always less than 1e8 hours.
+	return strconv.FormatInt(int64(timeout/time.Hour), 10) + "H"
 }
 
 func statFromResponse(reply *http.Response, detailsCodec encoding.CodecV2) *status.Status {

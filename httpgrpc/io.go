@@ -36,7 +36,7 @@ func writeSizePreface(w io.Writer, sz int32) error {
 func writeProtoMessage(w io.Writer, codec encoding.CodecV2, m interface{}, end bool) error {
 	buf, err := codec.Marshal(m)
 	if err != nil {
-		return err
+		return marshalError{err}
 	}
 	b := buf.Materialize()
 
@@ -60,6 +60,20 @@ func writeProtoMessage(w io.Writer, codec encoding.CodecV2, m interface{}, end b
 		}
 	}
 	return err
+}
+
+// marshalError is returned by a stream writer for a message that could not be
+// encoded, to tell it apart from a failure to write the encoded message.
+type marshalError struct {
+	err error
+}
+
+func (e marshalError) Error() string {
+	return e.err.Error()
+}
+
+func (e marshalError) Unwrap() error {
+	return e.err
 }
 
 // readSizePreface reads a 32-bit size from the given reader. If the value is
@@ -105,6 +119,7 @@ func asMetadata(header http.Header) (metadata.MD, error) {
 var reservedHeaders = map[string]struct{}{
 	"accept-encoding":   {},
 	"connection":        {},
+	"content-encoding":  {},
 	"content-type":      {},
 	"content-length":    {},
 	"keep-alive":        {},
@@ -114,12 +129,23 @@ var reservedHeaders = map[string]struct{}{
 	"upgrade":           {},
 }
 
+// isReservedHeader reports whether the given lower-case header name belongs to
+// HTTP or to this protocol, and so cannot be sent as metadata: the peer would
+// take it for something other than metadata. The protocol's own headers are
+// GRPC-Timeout and those that start with "X-GRPC-", for status, details and
+// unary trailers.
+func isReservedHeader(lowerK string) bool {
+	if _, ok := reservedHeaders[lowerK]; ok {
+		return true
+	}
+	return lowerK == "grpc-timeout" || strings.HasPrefix(lowerK, "x-grpc-")
+}
+
 func toHeaders(md metadata.MD, h http.Header, prefix string) {
 	// binary headers must be base-64-encoded
 	for k, vs := range md {
 		lowerK := strings.ToLower(k)
-		if _, ok := reservedHeaders[lowerK]; ok {
-			// ignore reserved header keys
+		if isReservedHeader(lowerK) {
 			continue
 		}
 		isBin := strings.HasSuffix(lowerK, "-bin")
@@ -231,7 +257,7 @@ func newJSONWriter(w io.Writer, codec encoding.CodecV2) func(m any, isTrailer bo
 
 		data, err := codec.Marshal(m)
 		if err != nil {
-			return err
+			return marshalError{err}
 		}
 
 		_, err = w.Write(data.Materialize())
