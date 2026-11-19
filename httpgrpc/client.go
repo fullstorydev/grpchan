@@ -534,13 +534,13 @@ func (cs *clientStream) SendMsg(m interface{}) error {
 // alone would leave the reader to fill in a cancellation instead, which
 // explains far less.
 func (cs *clientStream) endStream(err error) {
+	defer cs.cancel()
 	cs.rMu.Lock()
+	defer cs.rMu.Unlock()
 	if cs.rErr == nil {
 		cs.rErr = err
 	}
 	cs.done = true
-	cs.rMu.Unlock()
-	cs.cancel()
 }
 
 func (cs *clientStream) RecvMsg(m interface{}) error {
