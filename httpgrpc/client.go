@@ -154,7 +154,7 @@ var grpcDetailsHeader = textproto.CanonicalMIMEHeaderKey("X-GRPC-Details")
 
 // Invoke satisfies the grpchan.Channel interface and supports sending unary
 // RPCs via the in-process channel.
-func (ch *Channel) Invoke(ctx context.Context, methodName string, req, resp interface{}, opts ...grpc.CallOption) error {
+func (ch *Channel) Invoke(ctx context.Context, methodName string, req, resp any, opts ...grpc.CallOption) error {
 	chOpts, err := ch.channelOptions()
 	if err != nil {
 		return err
@@ -329,13 +329,13 @@ func (w *clientStreamWrapper) Context() context.Context {
 	return ctx
 }
 
-func (w *clientStreamWrapper) SendMsg(m interface{}) error {
+func (w *clientStreamWrapper) SendMsg(m any) error {
 	err := w.stream.SendMsg(m)
 	runtime.KeepAlive(w)
 	return err
 }
 
-func (w *clientStreamWrapper) RecvMsg(m interface{}) error {
+func (w *clientStreamWrapper) RecvMsg(m any) error {
 	err := w.stream.RecvMsg(m)
 	runtime.KeepAlive(w)
 	return err
@@ -501,7 +501,7 @@ func (cs *clientStream) readErrorIfDone() (bool, error) {
 	return true, status.FromProto(&statProto).Err()
 }
 
-func (cs *clientStream) SendMsg(m interface{}) error {
+func (cs *clientStream) SendMsg(m any) error {
 	// GRPC streams return EOF error for attempts to send on closed stream
 	if done, _ := cs.readErrorIfDone(); done {
 		return io.EOF
@@ -515,8 +515,7 @@ func (cs *clientStream) SendMsg(m interface{}) error {
 	}
 
 	cs.wErr = cs.streamWriter(m, false)
-	var marshalErr marshalError
-	if errors.As(cs.wErr, &marshalErr) {
+	if marshalErr, ok := errors.AsType[marshalError](cs.wErr); ok {
 		// Like gRPC-Go, a message that can't be encoded ends the RPC, since nothing
 		// else will: the server is left waiting for the message. Failures to write
 		// are left alone, since they mean the RPC is already ending, and RecvMsg is
@@ -543,7 +542,7 @@ func (cs *clientStream) endStream(err error) {
 	cs.done = true
 }
 
-func (cs *clientStream) RecvMsg(m interface{}) error {
+func (cs *clientStream) RecvMsg(m any) error {
 	if done, err := cs.readErrorIfDone(); done {
 		return err
 	}

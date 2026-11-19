@@ -272,7 +272,7 @@ func testServerStream(t *testing.T, cli TestServiceClient) {
 
 		checkResponseHeaders(t, ss, testMdHeaders)
 
-		for i := 0; i < 5; i++ {
+		for i := range 5 {
 			m, err := ss.Recv()
 			if err != nil {
 				t.Fatalf("receiving message #%d failed: %v", i+1, err)
@@ -302,7 +302,7 @@ func testServerStream(t *testing.T, cli TestServiceClient) {
 
 		checkResponseHeaders(t, ss, testMdHeaders)
 
-		for i := 0; i < 2; i++ {
+		for i := range 2 {
 			m, err := ss.Recv()
 			if err != nil {
 				t.Fatalf("receiving message #%d failed: %v", i+1, err)
@@ -536,7 +536,7 @@ func testFullDuplexBidiStream(t *testing.T, cli TestServiceClient) {
 			t.Fatalf("RPC failed: %v", err)
 		}
 
-		for i := 0; i < 3; i++ {
+		for i := range 3 {
 			err = bidi.Send(req)
 			if err != nil {
 				t.Fatalf("sending message #%d failed: %v", i+1, err)

@@ -55,7 +55,7 @@ type frame struct {
 	// be exchanged. For RPCs that require exactly one message to be exchanged,
 	// it may still be omitted if the RPC failed (which means the final frame
 	// must be an error frame).
-	data interface{}
+	data any
 
 	// If non-nil, this is a headers frame. A headers frame is optional. If the
 	// server is sending no headers, it may be omitted.
@@ -140,7 +140,7 @@ var (
 // gRPC server, an in-process channel only allows a single implementation for a
 // particular service. Services are identified by their fully-qualified name
 // (e.g. "<package>.<service>").
-func (c *Channel) RegisterService(desc *grpc.ServiceDesc, svr interface{}) {
+func (c *Channel) RegisterService(desc *grpc.ServiceDesc, svr any) {
 	if c.handlers == nil {
 		c.handlers = grpchan.HandlerMap{}
 	}
@@ -227,7 +227,7 @@ func (inprocessAddr) AuthType() string {
 
 // Invoke satisfies the grpchan.Channel interface and supports sending unary
 // RPCs via the in-process channel.
-func (c *Channel) Invoke(ctx context.Context, method string, req, resp interface{}, opts ...grpc.CallOption) error {
+func (c *Channel) Invoke(ctx context.Context, method string, req, resp any, opts ...grpc.CallOption) error {
 	copts := internal.GetCallOptions(opts)
 	copts.SetPeer(&inprocessPeer)
 
@@ -269,7 +269,7 @@ func (c *Channel) Invoke(ctx context.Context, method string, req, resp interface
 		c.clientStatsHandler.outPayload(ctx, req)
 	}
 
-	codec := func(out interface{}) error {
+	codec := func(out any) error {
 		return cloner.Copy(out, req)
 	}
 	ctx, cancel := context.WithCancel(ctx)
@@ -504,7 +504,7 @@ type noValuesContext struct {
 	context.Context
 }
 
-func (ctx noValuesContext) Value(_ interface{}) interface{} {
+func (ctx noValuesContext) Value(_ any) any {
 	return nil
 }
 
@@ -643,7 +643,7 @@ func (s *inProcessServerStream) Context() context.Context {
 	return s.ctx
 }
 
-func (s *inProcessServerStream) SendMsg(m interface{}) error {
+func (s *inProcessServerStream) SendMsg(m any) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -669,7 +669,7 @@ func (s *inProcessServerStream) SendMsg(m interface{}) error {
 	return writeMessage(s.ctx, nil, s.responses, frame{data: m})
 }
 
-func (s *inProcessServerStream) RecvMsg(m interface{}) error {
+func (s *inProcessServerStream) RecvMsg(m any) error {
 	resp, err := readMessage(s.ctx, s.requests)
 	if err != nil {
 		return err
@@ -769,7 +769,7 @@ func (s *inProcessClientStream) Context() context.Context {
 	return s.ctx
 }
 
-func (s *inProcessClientStream) SendMsg(m interface{}) error {
+func (s *inProcessClientStream) SendMsg(m any) error {
 	s.reqMu.Lock()
 	defer s.reqMu.Unlock()
 
@@ -790,13 +790,13 @@ func (s *inProcessClientStream) SendMsg(m interface{}) error {
 	return writeMessage(s.ctx, s.svrCtx, s.requests, frame{data: m})
 }
 
-func (s *inProcessClientStream) RecvMsg(m interface{}) error {
+func (s *inProcessClientStream) RecvMsg(m any) error {
 	s.respMu.Lock()
 	defer s.respMu.Unlock()
 	return s.recvMsgLocked(m, !s.responseStream)
 }
 
-func (s *inProcessClientStream) recvMsgLocked(m interface{}, lastMessage bool) error {
+func (s *inProcessClientStream) recvMsgLocked(m any, lastMessage bool) error {
 	// handle peeked message (if there is one) first
 	if s.last != nil {
 		switch s.last.kind() {
@@ -869,7 +869,7 @@ func (s *inProcessClientStream) callEndOnceLocked(err error) {
 	}
 }
 
-func (s *inProcessClientStream) ensureNoMoreLocked(m interface{}) error {
+func (s *inProcessClientStream) ensureNoMoreLocked(m any) error {
 	mCopy := reflect.New(reflect.TypeOf(m).Elem()).Interface()
 	if err := s.recvMsgLocked(mCopy, false); err == nil {
 		s.last = &frame{err: status.Error(codes.Internal, "method should return 1 response message but server sent >1")}
@@ -910,7 +910,7 @@ func writeMessage(ctx, remoteCtx context.Context, ch chan<- frame, m frame) erro
 	return ctx.Err()
 }
 
-func isNil(m interface{}) bool {
+func isNil(m any) bool {
 	if m == nil {
 		return true
 	}
@@ -955,7 +955,7 @@ func (sh *statsHandlerHelper) inHeader(ctx context.Context, md metadata.MD) {
 	})
 }
 
-func (sh *statsHandlerHelper) inPayload(ctx context.Context, payload interface{}) {
+func (sh *statsHandlerHelper) inPayload(ctx context.Context, payload any) {
 	sh.handler.HandleRPC(ctx, &stats.InPayload{
 		Payload:    payload,
 		Length:     0, // in-process has no wire encoding
@@ -977,7 +977,7 @@ func (sh *statsHandlerHelper) outHeader(ctx context.Context, md metadata.MD) {
 	})
 }
 
-func (sh *statsHandlerHelper) outPayload(ctx context.Context, payload interface{}) {
+func (sh *statsHandlerHelper) outPayload(ctx context.Context, payload any) {
 	sh.handler.HandleRPC(ctx, &stats.OutPayload{
 		Payload:    payload,
 		Length:     0, // in-process has no wire encoding

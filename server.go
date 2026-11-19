@@ -23,13 +23,13 @@ var _ grpc.ServiceRegistrar = HandlerMap(nil)
 
 type service struct {
 	desc    *grpc.ServiceDesc
-	handler interface{}
+	handler any
 }
 
 // RegisterService registers the given handler to be used for the given service.
 // Only a single handler can be registered for a given service. And services are
 // identified by their fully-qualified name (e.g. "package.name.Service").
-func (m HandlerMap) RegisterService(desc *grpc.ServiceDesc, h interface{}) {
+func (m HandlerMap) RegisterService(desc *grpc.ServiceDesc, h any) {
 	ht := reflect.TypeOf(desc.HandlerType).Elem()
 	st := reflect.TypeOf(h)
 	if !st.Implements(ht) {
@@ -44,7 +44,7 @@ func (m HandlerMap) RegisterService(desc *grpc.ServiceDesc, h interface{}) {
 // QueryService returns the service descriptor and handler for the named
 // service. If no handler has been registered for the named service, then
 // nil, nil is returned.
-func (m HandlerMap) QueryService(name string) (*grpc.ServiceDesc, interface{}) {
+func (m HandlerMap) QueryService(name string) (*grpc.ServiceDesc, any) {
 	svc := m[name]
 	return svc.desc, svc.handler
 }
@@ -96,7 +96,7 @@ func (m HandlerMap) GetServiceInfo() map[string]grpc.ServiceInfo {
 //	reg.ForEach(ipch.RegisterService)
 //	//   And HTTP 1.1
 //	httpgrpc.HandleServices(http.HandleFunc, "/rpc/", reg, nil, nil)
-func (m HandlerMap) ForEach(fn func(desc *grpc.ServiceDesc, svr interface{})) {
+func (m HandlerMap) ForEach(fn func(desc *grpc.ServiceDesc, svr any)) {
 	for _, svc := range m {
 		fn(svc.desc, svc.handler)
 	}

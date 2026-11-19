@@ -97,7 +97,7 @@ func TestUseDynamicMessage(t *testing.T) {
 		t.Fatalf("wrong payload returned: expecting %v; got %v", testPayload, payload)
 	}
 	reqHeaders := map[string][]byte{}
-	for k, v := range msg.GetFieldByName("headers").(map[interface{}]interface{}) {
+	for k, v := range msg.GetFieldByName("headers").(map[any]any) {
 		reqHeaders[k.(string)] = v.([]byte)
 	}
 	if !reflect.DeepEqual(testOutgoingMd, reqHeaders) {
