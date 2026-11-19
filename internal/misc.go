@@ -17,7 +17,7 @@ import (
 // CopyMessage copies data from the given in value to the given out value. It returns an
 // error if the two values do not have the same type or if the given out value is not
 // settable.
-func CopyMessage(out, in interface{}) error {
+func CopyMessage(out, in any) error {
 	pmIn, ok := in.(proto.Message)
 	if !ok {
 		return fmt.Errorf("value to copy is not a proto.Message: %T; use a custom cloner", in)
@@ -34,7 +34,7 @@ func CopyMessage(out, in interface{}) error {
 }
 
 // CloneMessage returns a copy of the given value.
-func CloneMessage(m interface{}) (interface{}, error) {
+func CloneMessage(m any) (any, error) {
 	pm, ok := m.(proto.Message)
 	if !ok {
 		return nil, fmt.Errorf("value to clone is not a proto.Message: %T; use a custom cloner", m)
@@ -46,7 +46,7 @@ func CloneMessage(m interface{}) (interface{}, error) {
 
 // ClearMessage resets the given value to its zero-value state. It returns an error
 // if the given out value is not settable.
-func ClearMessage(m interface{}) error {
+func ClearMessage(m any) error {
 	dest := reflect.Indirect(reflect.ValueOf(m))
 	if !dest.CanSet() {
 		return fmt.Errorf("unable to set destination: %v", reflect.ValueOf(m).Type())

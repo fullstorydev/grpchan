@@ -41,11 +41,11 @@ func TestProtoCloner(t *testing.T) {
 
 type protoCodec struct{}
 
-func (protoCodec) Marshal(v interface{}) ([]byte, error) {
+func (protoCodec) Marshal(v any) ([]byte, error) {
 	return proto.Marshal(v.(proto.Message))
 }
 
-func (protoCodec) Unmarshal(data []byte, v interface{}) error {
+func (protoCodec) Unmarshal(data []byte, v any) error {
 	return proto.Unmarshal(data, v.(proto.Message))
 }
 
@@ -58,13 +58,13 @@ func TestCodecCloner(t *testing.T) {
 }
 
 func TestCloneFunc(t *testing.T) {
-	testCloner(t, CloneFunc(func(in interface{}) (interface{}, error) {
+	testCloner(t, CloneFunc(func(in any) (any, error) {
 		return proto.Clone(in.(proto.Message)), nil
 	}))
 }
 
 func TestCopyFunc(t *testing.T) {
-	testCloner(t, CopyFunc(func(out, in interface{}) error {
+	testCloner(t, CopyFunc(func(out, in any) error {
 		if reflect.TypeOf(in) != reflect.TypeOf(out) {
 			return fmt.Errorf("type mismatch: %T != %T", in, out)
 		}

@@ -334,7 +334,7 @@ func TestStreamSurvivesGC(t *testing.T) {
 	cc := httpgrpc.Channel{Transport: http.DefaultTransport, BaseURL: u}
 	cli := grpchantesting.NewTestServiceClient(&cc)
 
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		// The deadline is what should end this call: the server sleeps for far
 		// longer, so the stream stays blocked in Recv throughout.
 		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
@@ -350,7 +350,7 @@ func TestStreamSurvivesGC(t *testing.T) {
 		done := make(chan struct{})
 		go func() {
 			defer close(done)
-			for j := 0; j < 20; j++ {
+			for range 20 {
 				runtime.GC()
 				time.Sleep(2 * time.Millisecond)
 			}
@@ -428,7 +428,7 @@ func TestAbandonedStreamIsCleanedUp(t *testing.T) {
 		t.Fatalf("failed to start the stream: %v", err)
 	}
 
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		runtime.GC()
 		select {
 		case err := <-transport.ended:

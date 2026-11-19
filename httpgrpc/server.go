@@ -97,7 +97,7 @@ func NewServer(opts ...ServerOption) *Server {
 // gRPC server, a gRPC-over-HTTP server only allows a single implementation for a
 // particular service. Services are identified by their fully-qualified name
 // (e.g. "<package>.<service>").
-func (s *Server) RegisterService(desc *grpc.ServiceDesc, svr interface{}) {
+func (s *Server) RegisterService(desc *grpc.ServiceDesc, svr any) {
 	s.handlers.RegisterService(desc, svr)
 	for i := range desc.Methods {
 		md := desc.Methods[i]
@@ -220,7 +220,7 @@ func HandleServices(mux Mux, basePath string, reg grpchan.HandlerMap, unaryInt g
 		opt(&hOpts)
 	}
 
-	reg.ForEach(func(desc *grpc.ServiceDesc, svr interface{}) {
+	reg.ForEach(func(desc *grpc.ServiceDesc, svr any) {
 		for i := range desc.Methods {
 			md := desc.Methods[i]
 			h := handleMethod(svr, desc.ServiceName, &md, unaryInt, &hOpts)
@@ -236,7 +236,7 @@ func HandleServices(mux Mux, basePath string, reg grpchan.HandlerMap, unaryInt g
 
 // HandleMethod returns an HTTP handler that will handle a unary RPC method
 // by dispatching the given method on the given server.
-func HandleMethod(svr interface{}, serviceName string, desc *grpc.MethodDesc, unaryInt grpc.UnaryServerInterceptor, opts ...HandlerOption) http.HandlerFunc {
+func HandleMethod(svr any, serviceName string, desc *grpc.MethodDesc, unaryInt grpc.UnaryServerInterceptor, opts ...HandlerOption) http.HandlerFunc {
 	var hOpts handlerOpts
 	for _, opt := range opts {
 		opt(&hOpts)
@@ -244,7 +244,7 @@ func HandleMethod(svr interface{}, serviceName string, desc *grpc.MethodDesc, un
 	return handleMethod(svr, serviceName, desc, unaryInt, &hOpts)
 }
 
-func handleMethod(svr interface{}, serviceName string, desc *grpc.MethodDesc, unaryInt grpc.UnaryServerInterceptor, opts *handlerOpts) http.HandlerFunc {
+func handleMethod(svr any, serviceName string, desc *grpc.MethodDesc, unaryInt grpc.UnaryServerInterceptor, opts *handlerOpts) http.HandlerFunc {
 	errHandler := opts.errFunc
 	if errHandler == nil {
 		errHandler = DefaultErrorRenderer
@@ -282,7 +282,7 @@ func handleMethod(svr interface{}, serviceName string, desc *grpc.MethodDesc, un
 			return
 		}
 
-		dec := func(msg interface{}) error {
+		dec := func(msg any) error {
 			if err := codec.Unmarshal(mem.BufferSlice{mem.SliceBuffer(req)}, msg); err != nil {
 				return status.Error(codes.InvalidArgument, err.Error())
 			}
@@ -331,7 +331,7 @@ func handleMethod(svr interface{}, serviceName string, desc *grpc.MethodDesc, un
 
 // HandleStream returns an HTTP handler that will handle a streaming RPC method
 // by dispatching the given method on the given server.
-func HandleStream(svr interface{}, serviceName string, desc *grpc.StreamDesc, streamInt grpc.StreamServerInterceptor, opts ...HandlerOption) http.HandlerFunc {
+func HandleStream(svr any, serviceName string, desc *grpc.StreamDesc, streamInt grpc.StreamServerInterceptor, opts ...HandlerOption) http.HandlerFunc {
 	var hOpts handlerOpts
 	for _, opt := range opts {
 		opt(&hOpts)
@@ -339,7 +339,7 @@ func HandleStream(svr interface{}, serviceName string, desc *grpc.StreamDesc, st
 	return handleStream(svr, serviceName, desc, streamInt, &hOpts)
 }
 
-func handleStream(svr interface{}, serviceName string, desc *grpc.StreamDesc, streamInt grpc.StreamServerInterceptor, opts *handlerOpts) http.HandlerFunc {
+func handleStream(svr any, serviceName string, desc *grpc.StreamDesc, streamInt grpc.StreamServerInterceptor, opts *handlerOpts) http.HandlerFunc {
 	info := &grpc.StreamServerInfo{
 		FullMethod:     fmt.Sprintf("/%s/%s", serviceName, desc.StreamName),
 		IsClientStream: desc.ClientStreams,
@@ -515,7 +515,7 @@ func (s *serverStream) Context() context.Context {
 	return s.ctx
 }
 
-func (s *serverStream) SendMsg(m interface{}) error {
+func (s *serverStream) SendMsg(m any) error {
 	s.wmu.Lock()
 	defer s.wmu.Unlock()
 
@@ -534,7 +534,7 @@ func (s *serverStream) SendMsg(m interface{}) error {
 	return err
 }
 
-func (s *serverStream) RecvMsg(m interface{}) error {
+func (s *serverStream) RecvMsg(m any) error {
 	s.rmu.Lock()
 	defer s.rmu.Unlock()
 

@@ -3,6 +3,7 @@ package httpgrpc_test
 import (
 	"bytes"
 	"context"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -153,9 +154,7 @@ func TestMetadataCannotSetProtocolHeaders(t *testing.T) {
 	})
 	t.Run("response", func(t *testing.T) {
 		headers := map[string][]byte{"custom": []byte("value")}
-		for k, v := range reserved {
-			headers[k] = v
-		}
+		maps.Copy(headers, reserved)
 		var hdr, tlr metadata.MD
 		_, err := cli.Unary(context.Background(), &grpchantesting.Message{Headers: headers}, grpc.Header(&hdr), grpc.Trailer(&tlr))
 		if err != nil {

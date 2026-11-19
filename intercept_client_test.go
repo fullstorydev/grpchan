@@ -22,7 +22,7 @@ func TestInterceptClientConnUnary(t *testing.T) {
 
 	var successCount, failCount int
 	intercepted := grpchan.InterceptClientConn(&tc,
-		func(ctx context.Context, method string, req, reply interface{}, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+		func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
 			if err := invoker(ctx, method, req, reply, cc, opts...); err != nil {
 				failCount++
 				return err
@@ -138,7 +138,7 @@ func TestInterceptClientConnStream(t *testing.T) {
 		t.Fatalf("RPC failed: %v", err)
 	}
 
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		resp, err = ss.Recv()
 		if err != nil {
 			t.Fatalf("failed to receive response #%d: %v", i+1, err)
@@ -174,7 +174,7 @@ func TestInterceptClientConnStream(t *testing.T) {
 		t.Fatalf("sending request #3 failed: %v", err)
 	}
 
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		resp, err = bs.Recv()
 		if err != nil {
 			t.Fatalf("failed to receive response #%d: %v", i+1, err)
@@ -243,7 +243,7 @@ type testInterceptClientStream struct {
 	serverStreams, closed                 bool
 }
 
-func (s *testInterceptClientStream) RecvMsg(m interface{}) error {
+func (s *testInterceptClientStream) RecvMsg(m any) error {
 	err := s.ClientStream.RecvMsg(m)
 	if err == nil {
 		*s.messageCount++
@@ -279,7 +279,7 @@ func (s *testInterceptClientStream) RecvMsg(m interface{}) error {
 // testConn is not thread-safe, and neither are any returned streams.
 type testConn struct {
 	code      codes.Code
-	resp      interface{}
+	resp      any
 	respCount int
 	headers   metadata.MD
 	trailers  metadata.MD
@@ -292,7 +292,7 @@ type call struct {
 	reqs       []proto.Message
 }
 
-func (ch *testConn) Invoke(ctx context.Context, methodName string, req, resp interface{}, _ ...grpc.CallOption) error {
+func (ch *testConn) Invoke(ctx context.Context, methodName string, req, resp any, _ ...grpc.CallOption) error {
 	headers, _ := metadata.FromOutgoingContext(ctx)
 	reqClone, err := internal.CloneMessage(req)
 	if err != nil {
@@ -334,7 +334,7 @@ func (ch *testConn) NewStream(ctx context.Context, desc *grpc.StreamDesc, method
 type testClientStream struct {
 	ctx        context.Context
 	code       codes.Code
-	resp       interface{}
+	resp       any
 	respCount  int
 	headers    metadata.MD
 	trailers   metadata.MD
@@ -360,7 +360,7 @@ func (s *testClientStream) Context() context.Context {
 	return s.ctx
 }
 
-func (s *testClientStream) SendMsg(m interface{}) error {
+func (s *testClientStream) SendMsg(m any) error {
 	if s.halfClosed {
 		return fmt.Errorf("stream closed")
 	}
@@ -378,7 +378,7 @@ func (s *testClientStream) SendMsg(m interface{}) error {
 	return nil
 }
 
-func (s *testClientStream) RecvMsg(m interface{}) error {
+func (s *testClientStream) RecvMsg(m any) error {
 	if err := s.ctx.Err(); err != nil {
 		return internal.TranslateContextError(err)
 	}

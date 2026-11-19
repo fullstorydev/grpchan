@@ -33,7 +33,7 @@ func writeSizePreface(w io.Writer, sz int32) error {
 // size is written as a negative value, indicating to the receiver that this
 // is the last message in the stream. (The last message should be an instance
 // of HttpTrailer.)
-func writeProtoMessage(w io.Writer, codec encoding.CodecV2, m interface{}, end bool) error {
+func writeProtoMessage(w io.Writer, codec encoding.CodecV2, m any, end bool) error {
 	buf, err := codec.Marshal(m)
 	if err != nil {
 		return marshalError{err}

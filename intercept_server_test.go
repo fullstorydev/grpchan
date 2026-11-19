@@ -25,14 +25,14 @@ func TestInterceptServerUnary(t *testing.T) {
 
 	// this will make sure unary interceptors are composed correctly
 	var lastSeen string
-	outerInt := func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
+	outerInt := func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
 		lastSeen = "a"
 		return handler(ctx, req)
 	}
 
 	var successCount, failCount int
 	grpchantesting.RegisterTestServiceServer(grpchan.WithInterceptor(handlers,
-		func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
+		func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
 			if lastSeen != "a" {
 				// interceptor above should have been invoked first!
 				return nil, fmt.Errorf("interceptor not correctly invoked!")
@@ -65,7 +65,7 @@ func TestInterceptServerUnary(t *testing.T) {
 	// success
 	svr.resp = &grpchantesting.Message{Count: 123}
 	var m grpchantesting.Message
-	dec := func(req interface{}) error {
+	dec := func(req any) error {
 		reqMsg := req.(*grpchantesting.Message)
 		proto.Reset(reqMsg)
 		proto.Merge(reqMsg, &m)
@@ -131,7 +131,7 @@ func TestInterceptServerStream(t *testing.T) {
 
 	var messageCount, successCount, failCount int
 	grpchantesting.RegisterTestServiceServer(grpchan.WithInterceptor(handlers, nil,
-		func(srv interface{}, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
+		func(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
 			err := handler(srv, &testInterceptServerStream{
 				ServerStream: ss,
 				messageCount: &messageCount,
@@ -303,7 +303,7 @@ type testInterceptServerStream struct {
 	messageCount *int
 }
 
-func (s *testInterceptServerStream) SendMsg(m interface{}) error {
+func (s *testInterceptServerStream) SendMsg(m any) error {
 	err := s.ServerStream.SendMsg(m)
 	if err == nil {
 		*s.messageCount++
@@ -482,7 +482,7 @@ func (s *testServerStream) Context() context.Context {
 	return s.ctx
 }
 
-func (s *testServerStream) SendMsg(m interface{}) error {
+func (s *testServerStream) SendMsg(m any) error {
 	if err := s.ctx.Err(); err != nil {
 		return internal.TranslateContextError(err)
 	}
@@ -494,7 +494,7 @@ func (s *testServerStream) SendMsg(m interface{}) error {
 	return nil
 }
 
-func (s *testServerStream) RecvMsg(m interface{}) error {
+func (s *testServerStream) RecvMsg(m any) error {
 	if len(s.reqs) == 0 {
 		return io.EOF
 	}
