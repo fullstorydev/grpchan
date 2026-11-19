@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net/http"
 	"path"
 	"strconv"
@@ -276,7 +275,7 @@ func handleMethod(svr interface{}, serviceName string, desc *grpc.MethodDesc, un
 		}
 		defer cancel()
 
-		req, err := ioutil.ReadAll(r.Body)
+		req, err := io.ReadAll(r.Body)
 		if err != nil {
 			writeError(w, 499)
 			return
@@ -420,7 +419,7 @@ func peerFromRequest(r *http.Request) *peer.Peer {
 }
 
 func drainAndClose(r io.ReadCloser) error {
-	_, copyErr := io.Copy(ioutil.Discard, r)
+	_, copyErr := io.Copy(io.Discard, r)
 	closeErr := r.Close()
 	// error from io.Copy likely more useful than the one from Close
 	if copyErr != nil {
