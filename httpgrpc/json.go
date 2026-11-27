@@ -3,13 +3,11 @@ package httpgrpc
 import (
 	"fmt"
 
-	//lint:ignore SA1019 we use the old v1 package because
-	//  we need to support older generated messages
-	protov1 "github.com/golang/protobuf/proto"
 	"google.golang.org/grpc/encoding"
 	"google.golang.org/grpc/mem"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/protoadapt"
 )
 
 const jsonCodecName = "json"
@@ -57,9 +55,9 @@ func asProtoMessage(v any) (proto.Message, error) {
 	if ok {
 		return msg, nil
 	}
-	msgV1, ok := v.(protov1.Message)
+	msgV1, ok := v.(protoadapt.MessageV1)
 	if ok {
-		return protov1.MessageV2(msgV1), nil
+		return protoadapt.MessageV2Of(msgV1), nil
 	}
 	return nil, fmt.Errorf("%T does not implement proto.Message", v)
 }
