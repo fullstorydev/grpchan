@@ -1,0 +1,16 @@
+syntax = "proto3";
+
+package testdata.nogopackage;
+
+import "common/types.proto";
+
+message Request {
+  testdata.common.Shared shared = 1;
+}
+
+message Response {}
+
+service Bare {
+  rpc Call(Request) returns (Response);
+  rpc Stream(Request) returns (stream Response);
+}

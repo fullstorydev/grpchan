@@ -1,0 +1,13 @@
+syntax = "proto3";
+
+package testdata.nogopackage.sub;
+
+import "nogopackage.proto";
+
+message Wrapper {
+  testdata.nogopackage.Request request = 1;
+}
+
+service Nested {
+  rpc Call(Wrapper) returns (testdata.nogopackage.Response);
+}

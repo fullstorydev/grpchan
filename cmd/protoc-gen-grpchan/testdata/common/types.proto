@@ -1,0 +1,13 @@
+syntax = "proto3";
+
+package testdata.common;
+
+option go_package = "example.com/grpchan/testdata/common;commonpb";
+
+message Shared {
+  string name = 1;
+}
+
+message snake_shared {
+  string name = 1;
+}
