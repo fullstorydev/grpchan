@@ -1,0 +1,9 @@
+syntax = "proto3";
+
+package testdata.noservices;
+
+option go_package = "example.com/grpchan/testdata/noservices;noservicespb";
+
+message Plain {
+  string value = 1;
+}

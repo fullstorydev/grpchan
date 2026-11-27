@@ -1,0 +1,43 @@
+syntax = "proto3";
+
+package testdata.services;
+
+import "common/types.proto";
+import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "example.com/grpchan/testdata/services;servicespb";
+
+message Outer {
+  message Inner {
+    optional string value = 1;
+  }
+  Inner inner = 1;
+}
+
+message snake_message {
+  string value = 1;
+}
+
+service Basic {
+  rpc Unary(Outer) returns (Outer);
+  rpc ClientStream(stream Outer) returns (Outer);
+  rpc ServerStream(Outer) returns (stream Outer);
+  rpc BidiStream(stream Outer) returns (stream Outer);
+  rpc NestedTypes(Outer.Inner) returns (Outer.Inner);
+  rpc ExternalPackage(testdata.common.Shared) returns (testdata.common.snake_shared);
+  rpc WellKnownTypes(google.protobuf.Empty) returns (google.protobuf.Timestamp);
+  rpc snake_case_method(snake_message) returns (snake_message);
+  rpc ServerStreamAfterBidi(snake_message) returns (stream snake_message);
+}
+
+service second_service {
+  rpc Do_Thing(snake_message) returns (snake_message);
+  rpc Watch(stream snake_message) returns (stream snake_message);
+}
+
+service Foo_Bar {
+  rpc Get(Outer) returns (Outer);
+}
+
+service NoMethods {}
