@@ -10,11 +10,11 @@ import (
 
 	"github.com/fullstorydev/grpchan/grpchantesting"
 	"github.com/fullstorydev/grpchan/inprocgrpc"
-	"github.com/jhump/protoreflect/desc"
-	"github.com/jhump/protoreflect/dynamic"
-	"github.com/jhump/protoreflect/dynamic/grpcdynamic"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protoreflect"
+	"google.golang.org/protobuf/types/dynamicpb"
 )
 
 func TestInProcessChannel(t *testing.T) {
@@ -49,23 +49,10 @@ func TestUseDynamicMessage(t *testing.T) {
 
 	var cc inprocgrpc.Channel
 	grpchantesting.RegisterTestServiceServer(&cc, svr)
-	stub := grpcdynamic.NewStub(&cc)
 
-	fd, err := desc.LoadFileDescriptor("test.proto")
-	if err != nil {
-		t.Fatalf("failed to load descriptor for test.proto: %v", err)
-	}
-	md := fd.FindMessage("grpchantesting.Message")
+	md := grpchantesting.File_test_proto.Messages().ByName("Message")
 	if md == nil {
 		t.Fatalf("could not find descriptor for grpchantesting.Message")
-	}
-	sd := fd.FindService("grpchantesting.TestService")
-	if sd == nil {
-		t.Fatalf("could not find descriptor for grpchantesting.TestService")
-	}
-	mtd := sd.FindMethodByName("Unary")
-	if mtd == nil {
-		t.Fatalf("could not find descriptor for grpchantesting.TestService/Unary")
 	}
 
 	testPayload := []byte{100, 90, 80, 70, 60, 50, 40, 30, 20, 10, 0}
@@ -80,26 +67,27 @@ func TestUseDynamicMessage(t *testing.T) {
 	}
 
 	ctx := metadata.NewOutgoingContext(context.Background(), grpchantesting.MetadataNew(testOutgoingMd))
-	req := dynamic.NewMessage(md)
-	req.SetFieldByName("payload", testPayload)
-	req.SetFieldByName("headers", testMdHeaders)
-	req.SetFieldByName("trailers", testMdTrailers)
+	req := dynamicpb.NewMessage(md)
+	req.Set(md.Fields().ByName("payload"), protoreflect.ValueOfBytes(testPayload))
+	setBytesMap(req, "headers", testMdHeaders)
+	setBytesMap(req, "trailers", testMdTrailers)
 
 	var hdr, tlr metadata.MD
-	rsp, err := stub.InvokeRpc(ctx, mtd, req, grpc.Header(&hdr), grpc.Trailer(&tlr))
+	rsp := dynamicpb.NewMessage(md)
+	err := cc.Invoke(ctx, "/grpchantesting.TestService/Unary", req, rsp, grpc.Header(&hdr), grpc.Trailer(&tlr))
 	if err != nil {
 		t.Fatalf("RPC failed: %v", err)
 	}
-	msg := rsp.(*dynamic.Message)
 
-	payload := msg.GetFieldByName("payload")
-	if !bytes.Equal(testPayload, payload.([]byte)) {
+	payload := rsp.Get(md.Fields().ByName("payload")).Bytes()
+	if !bytes.Equal(testPayload, payload) {
 		t.Fatalf("wrong payload returned: expecting %v; got %v", testPayload, payload)
 	}
 	reqHeaders := map[string][]byte{}
-	for k, v := range msg.GetFieldByName("headers").(map[any]any) {
-		reqHeaders[k.(string)] = v.([]byte)
-	}
+	rsp.Get(md.Fields().ByName("headers")).Map().Range(func(k protoreflect.MapKey, v protoreflect.Value) bool {
+		reqHeaders[k.String()] = v.Bytes()
+		return true
+	})
 	if !reflect.DeepEqual(testOutgoingMd, reqHeaders) {
 		t.Fatalf("wrong request headers echoed back: expecting %v; got %v", testOutgoingMd, reqHeaders)
 	}
@@ -124,5 +112,59 @@ func TestUseDynamicMessage(t *testing.T) {
 	}
 	if !reflect.DeepEqual(testMdTrailers, actualTlrs) {
 		t.Fatalf("wrong response trailers echoed back: expecting %v; got %v", testMdTrailers, actualTlrs)
+	}
+}
+
+func setBytesMap(m *dynamicpb.Message, field string, values map[string][]byte) {
+	fd := m.Descriptor().Fields().ByName(protoreflect.Name(field))
+	mp := m.Mutable(fd).Map()
+	for k, v := range values {
+		mp.Set(protoreflect.ValueOfString(k).MapKey(), protoreflect.ValueOfBytes(v))
+	}
+}
+
+// legacyMessage is a message that does not implement the current Protobuf Go
+// API. It resembles the dynamic messages from github.com/jhump/protoreflect v1,
+// which can be used with an in-process channel as long as the other side of
+// the copy is a message with a compatible wire format.
+type legacyMessage struct {
+	wire []byte
+}
+
+func (m *legacyMessage) Reset()         { m.wire = nil }
+func (m *legacyMessage) String() string { return "legacy" }
+func (m *legacyMessage) ProtoMessage()  {}
+
+func (m *legacyMessage) Marshal() ([]byte, error) { return m.wire, nil }
+
+func (m *legacyMessage) UnmarshalMerge(b []byte) error {
+	m.wire = append(m.wire, b...)
+	return nil
+}
+
+func TestUseLegacyMessage(t *testing.T) {
+	svr := &grpchantesting.TestServer{}
+
+	var cc inprocgrpc.Channel
+	grpchantesting.RegisterTestServiceServer(&cc, svr)
+
+	payload := []byte{1, 2, 3}
+	wire, err := proto.Marshal(&grpchantesting.Message{Payload: payload})
+	if err != nil {
+		t.Fatalf("failed to marshal request: %v", err)
+	}
+
+	req := &legacyMessage{wire: wire}
+	rsp := &legacyMessage{}
+	if err := cc.Invoke(context.Background(), "/grpchantesting.TestService/Unary", req, rsp); err != nil {
+		t.Fatalf("RPC failed: %v", err)
+	}
+
+	var actual grpchantesting.Message
+	if err := proto.Unmarshal(rsp.wire, &actual); err != nil {
+		t.Fatalf("failed to unmarshal response: %v", err)
+	}
+	if !bytes.Equal(payload, actual.Payload) {
+		t.Fatalf("wrong payload returned: expecting %v; got %v", payload, actual.Payload)
 	}
 }

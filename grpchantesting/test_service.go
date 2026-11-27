@@ -7,11 +7,11 @@ import (
 	"io"
 	"time"
 
-	"github.com/golang/protobuf/ptypes/empty"
 	spb "google.golang.org/genproto/googleapis/rpc/status"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 // TestServer has default responses to the various kinds of methods.
@@ -167,8 +167,8 @@ func (s *TestServer) BidiStream(str TestService_BidiStreamServer) error {
 }
 
 // UseExternalMessageTwice implements the TestService server interface.
-func (s *TestServer) UseExternalMessageTwice(ctx context.Context, in *empty.Empty) (*empty.Empty, error) {
-	return &empty.Empty{}, nil
+func (s *TestServer) UseExternalMessageTwice(ctx context.Context, in *emptypb.Empty) (*emptypb.Empty, error) {
+	return &emptypb.Empty{}, nil
 }
 
 func asMap(md metadata.MD) map[string][]byte {

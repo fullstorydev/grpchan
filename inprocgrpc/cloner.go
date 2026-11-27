@@ -4,11 +4,9 @@ import (
 	"fmt"
 	"reflect"
 
-	//lint:ignore SA1019 we use the old v1 package because
-	//  we need to support older generated messages
-	"github.com/golang/protobuf/proto"
 	"google.golang.org/grpc/encoding"
 	grpcproto "google.golang.org/grpc/encoding/proto"
+	"google.golang.org/protobuf/protoadapt"
 
 	"github.com/fullstorydev/grpchan/internal"
 )
@@ -35,8 +33,8 @@ type ProtoCloner struct{}
 var _ Cloner = ProtoCloner{}
 
 func (ProtoCloner) Copy(out, in any) error {
-	_, outIsProto := out.(proto.Message)
-	_, inIsProto := in.(proto.Message)
+	_, outIsProto := out.(protoadapt.MessageV1)
+	_, inIsProto := in.(protoadapt.MessageV1)
 	if inIsProto && outIsProto {
 		return internal.CopyMessage(out, in)
 	}
@@ -52,7 +50,7 @@ func (ProtoCloner) Copy(out, in any) error {
 }
 
 func (ProtoCloner) Clone(in any) (any, error) {
-	if _, isProto := in.(proto.Message); isProto {
+	if _, isProto := in.(protoadapt.MessageV1); isProto {
 		return internal.CloneMessage(in)
 	}
 	// maybe the user has registered a gRPC codec that can
