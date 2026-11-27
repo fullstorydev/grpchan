@@ -100,7 +100,7 @@ func generate(gen *protogen.Plugin, args codeGenArgs) error {
 func resolveGoPackages(req *pluginpb.CodeGeneratorRequest) {
 	var importPath string
 	mapped := map[string]bool{}
-	for _, param := range strings.Split(req.GetParameter(), ",") {
+	for param := range strings.SplitSeq(req.GetParameter(), ",") {
 		name, value, _ := strings.Cut(param, "=")
 		switch {
 		case name == "import_path":
@@ -132,7 +132,7 @@ func resolveGoPackages(req *pluginpb.CodeGeneratorRequest) {
 		if req.GetParameter() != "" {
 			params = append([]string{req.GetParameter()}, extra...)
 		}
-		req.Parameter = proto.String(strings.Join(params, ","))
+		req.Parameter = new(strings.Join(params, ","))
 	}
 }
 
