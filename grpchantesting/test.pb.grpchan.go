@@ -3,10 +3,12 @@
 
 package grpchantesting
 
-import "context"
-import "github.com/fullstorydev/grpchan"
-import "google.golang.org/grpc"
-import "google.golang.org/protobuf/types/known/emptypb"
+import (
+	context "context"
+	grpchan "github.com/fullstorydev/grpchan"
+	grpc "google.golang.org/grpc"
+	emptypb "google.golang.org/protobuf/types/known/emptypb"
+)
 
 // Deprecated: Use RegisterTestServiceServer instead.
 func RegisterHandlerTestService(reg grpchan.ServiceRegistry, srv TestServiceServer) {

@@ -4,8 +4,6 @@ go 1.26.0
 
 require (
 	github.com/golang/protobuf v1.5.4
-	github.com/jhump/gopoet v0.1.0
-	github.com/jhump/goprotoc v0.5.0
 	github.com/jhump/protoreflect v1.19.0
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20261110000943-09e21b237f2c
 	google.golang.org/grpc v1.85.0

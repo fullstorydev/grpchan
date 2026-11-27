@@ -2,8 +2,6 @@ package main
 
 import (
 	"testing"
-
-	"github.com/jhump/protoreflect/grpcreflect"
 )
 
 // we use bash to mv the file after it is generated so that it will end in "_test.go"
@@ -12,23 +10,24 @@ import (
 
 func TestStreamOrder(t *testing.T) {
 	// we get the service descriptor (same descriptor that protoc-gen-grpchan processes
-	sd, err := grpcreflect.LoadServiceDescriptor(&TestStreams_ServiceDesc)
-	if err != nil {
-		t.Fatalf("failed to load service descriptor: %v", err)
+	sd := File_gen_test_proto.Services().ByName("TestStreams")
+	if sd == nil {
+		t.Fatalf("failed to find service descriptor")
 	}
 
 	// loop through stream methods just as protoc-gen-grpchan does to emit code
 	streamCount := 0
-	for _, md := range sd.GetMethods() {
-		if md.IsClientStreaming() || md.IsServerStreaming() {
+	for i := 0; i < sd.Methods().Len(); i++ {
+		md := sd.Methods().Get(i)
+		if md.IsStreamingClient() || md.IsStreamingServer() {
 			// verify that the stream at current index is correct
 			// (code emits this index when querying the serviceDesc, so we must
 			// be certain that this index is right!)
 			strDesc := TestStreams_ServiceDesc.Streams[streamCount]
-			if md.GetName() != strDesc.StreamName {
-				t.Fatalf("wrong stream at %d: %s != %s", streamCount, md.GetName(), strDesc.StreamName)
+			if string(md.Name()) != strDesc.StreamName {
+				t.Fatalf("wrong stream at %d: %s != %s", streamCount, md.Name(), strDesc.StreamName)
 			}
-			if md.IsClientStreaming() != strDesc.ClientStreams || md.IsServerStreaming() != strDesc.ServerStreams {
+			if md.IsStreamingClient() != strDesc.ClientStreams || md.IsStreamingServer() != strDesc.ServerStreams {
 				t.Fatalf("wrong stream type at %d", streamCount)
 			}
 
